@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     提交并推送到 GitHub（直连失败时自动改走本机代理）。
 .EXAMPLE
