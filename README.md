@@ -1,5 +1,7 @@
 # BabelDOC Studio
 
+> 仓库：<https://github.com/PiDesign-314/Pi_BabelDOC-Studio>
+
 一个面向 **PDF 论文 / 技术文档** 的桌面级翻译工具：底层调用
 [BabelDOC](https://github.com/funstory-ai/BabelDOC)（保留原始排版、公式、图表），
 上层是本项目自研的 **iOS 风格可视化界面**，可自由配置任意 OpenAI 兼容大模型。
@@ -93,6 +95,8 @@ tests/
   test_smoke.py         命令拼装 / 阶段识别 / 产物重命名的离线测试
 tools/
   make_icon.py          生成应用图标（web/babeldoc.ico）
+  create_shortcut.ps1   重建桌面快捷方式
+  push.ps1              提交并推送（直连失败自动走本机代理）
 babeldoc_gui.py         旧版 Tkinter 界面（保留备查）
 ```
 
