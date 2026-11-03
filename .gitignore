@@ -6,6 +6,7 @@ venv/
 
 # Local dev scratch
 .preview/
+.qa/
 .tmp/
 *.log
 

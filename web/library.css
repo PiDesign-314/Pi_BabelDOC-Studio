@@ -1,0 +1,301 @@
+/* ---------------------------------------------------------------- *
+ *  Result library (library.html)
+ * ---------------------------------------------------------------- */
+
+.lib-wrap {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 22px 28px 44px;
+}
+
+.lib-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.lib-title h2 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 20px;
+  font-weight: 680;
+  letter-spacing: -0.4px;
+}
+
+.lib-count {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-controls { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+
+.lib-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--card);
+  color: var(--text-3);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.lib-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-ring);
+}
+
+.lib-search input {
+  width: 190px;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+}
+.lib-search input:focus { border: none; box-shadow: none; }
+.lib-search input::-webkit-search-cancel-button { cursor: pointer; }
+
+.lib-sort {
+  width: auto;
+  height: 38px;
+  min-height: 0;
+  padding: 0 34px 0 12px;
+  font-size: 13px;
+  border-radius: 11px;
+  background-position: right 12px center;
+}
+
+/* --------------------------------------------------------------- dirs -- */
+.lib-dirs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 2px 0 16px;
+}
+
+.lib-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 27px;
+  padding: 0 5px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text-2);
+  font-size: 11.5px;
+  max-width: 320px;
+}
+.lib-dir span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.lib-dir-x {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lib-dir-x:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* --------------------------------------------------------------- grid -- */
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: 18px;
+}
+
+.lib-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  animation: lib-in 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 42ms);
+  transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.3, 1), box-shadow 0.24s ease,
+    border-color 0.2s ease;
+}
+.lib-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+  box-shadow: 0 20px 38px -24px rgba(17, 17, 26, 0.42);
+}
+.lib-card.gone { animation: lib-out 0.2s ease forwards; }
+
+.lib-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background:
+    linear-gradient(160deg, var(--card-soft), var(--line));
+}
+.lib-thumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+  transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.lib-card:hover .lib-thumb img { transform: scale(1.035); }
+
+.lib-thumb .lib-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+
+.lib-pages {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(12, 12, 16, 0.58);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lib-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+  padding: 12px 14px 14px;
+  min-width: 0;
+}
+
+.lib-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 620;
+  line-height: 1.42;
+  letter-spacing: -0.1px;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.lib-rename {
+  width: 100%;
+  height: 30px;
+  min-height: 0;
+  padding: 0 9px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.lib-meta { margin: 0; font-size: 11.5px; color: var(--text-3); }
+
+.lib-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.lib-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card-soft);
+  color: var(--text-2);
+  font-size: 11px;
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+a.lib-chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+.lib-chip.notes {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.lib-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 5px;
+}
+
+.lib-actions button {
+  flex: 1;
+  height: 30px;
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card-soft);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+.lib-actions button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* -------------------------------------------------------------- empty -- */
+.lib-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 9px;
+  padding: 64px 20px 40px;
+}
+
+.lib-empty-icon {
+  width: 76px;
+  height: 76px;
+  border-radius: 24px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.lib-empty h3 { margin: 8px 0 0; font-size: 16px; font-weight: 640; }
+.lib-empty p { margin: 0; max-width: 400px; font-size: 13px; line-height: 1.65; color: var(--text-2); }
+.lib-empty-actions { display: flex; gap: 10px; margin-top: 8px; }
+
+@keyframes lib-in {
+  from { opacity: 0; transform: translateY(12px); }
+}
+@keyframes lib-out {
+  to { opacity: 0; transform: scale(0.96); }
+}
+
+@media (max-width: 720px) {
+  .lib-wrap { padding: 16px 16px 32px; }
+  .lib-search input { width: 120px; }
+  .lib-title h2 { font-size: 18px; }
+}

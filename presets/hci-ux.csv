@@ -1,0 +1,113 @@
+source,target,tgt_lng
+human-computer interaction,人机交互,zh
+interaction design,交互设计,zh
+user experience,用户体验,zh
+user interface,用户界面,zh
+usability,可用性,zh
+usability testing,可用性测试,zh
+user research,用户研究,zh
+user-centered design,以用户为中心的设计,zh
+human-centered design,以人为本的设计,zh
+affordance,可供性,zh
+signifier,示能符号,zh
+mental model,心智模型,zh
+conceptual model,概念模型,zh
+information architecture,信息架构,zh
+interaction model,交互模型,zh
+task analysis,任务分析,zh
+cognitive walkthrough,认知走查,zh
+heuristic evaluation,启发式评估,zh
+think-aloud protocol,出声思维法,zh
+wizard of oz study,绿野仙踪实验,zh
+contextual inquiry,情境调查,zh
+diary study,日记研究,zh
+semi-structured interview,半结构化访谈,zh
+focus group,焦点小组,zh
+questionnaire,问卷,zh
+participant,参与者,zh
+informed consent,知情同意,zh
+prototype,原型,zh
+low-fidelity prototype,低保真原型,zh
+high-fidelity prototype,高保真原型,zh
+wireframe,线框图,zh
+mockup,视觉稿,zh
+design system,设计系统,zh
+component library,组件库,zh
+design token,设计变量,zh
+style guide,样式指南,zh
+pattern library,模式库,zh
+responsive design,响应式设计,zh
+adaptive design,自适应设计,zh
+layout,布局,zh
+grid system,栅格系统,zh
+spacing,间距,zh
+typography,字体排印,zh
+typeface,字体,zh
+font weight,字重,zh
+contrast ratio,对比度,zh
+color palette,配色方案,zh
+accessibility,无障碍,zh
+inclusive design,包容性设计,zh
+universal design,通用设计,zh
+assistive technology,辅助技术,zh
+screen reader,屏幕阅读器,zh
+keyboard navigation,键盘导航,zh
+focus state,焦点状态,zh
+touch target,触控目标,zh
+gesture,手势,zh
+microinteraction,微交互,zh
+feedback,反馈,zh
+onboarding,新手引导,zh
+empty state,空状态,zh
+error state,错误状态,zh
+loading state,加载状态,zh
+progressive disclosure,渐进式披露,zh
+navigation,导航,zh
+breadcrumb,面包屑导航,zh
+modal dialog,模态对话框,zh
+tooltip,工具提示,zh
+dropdown menu,下拉菜单,zh
+toggle switch,开关,zh
+slider,滑块,zh
+form validation,表单校验,zh
+call to action,行动号召,zh
+conversion rate,转化率,zh
+engagement,参与度,zh
+retention,留存率,zh
+churn,流失,zh
+user journey map,用户旅程图,zh
+service blueprint,服务蓝图,zh
+persona,用户画像,zh
+scenario,场景,zh
+pain point,痛点,zh
+user story,用户故事,zh
+minimum viable product,最小可行产品,zh
+A/B testing,A/B 测试,zh
+analytics,数据分析,zh
+task success rate,任务成功率,zh
+time on task,任务耗时,zh
+error rate,错误率,zh
+satisfaction,满意度,zh
+system usability scale,系统可用性量表,zh
+NASA task load index,NASA 任务负荷指数,zh
+eye tracking,眼动追踪,zh
+physiological signal,生理信号,zh
+remote usability testing,远程可用性测试,zh
+participatory design,参与式设计,zh
+co-design,协同设计,zh
+design probe,设计探针,zh
+cultural probe,文化探针,zh
+speculative design,思辨设计,zh
+research through design,通过设计做研究,zh
+annotated portfolio,标注作品集,zh
+interaction technique,交互技术,zh
+input modality,输入模态,zh
+haptic feedback,触觉反馈,zh
+augmented reality,增强现实,zh
+virtual reality,虚拟现实,zh
+mixed reality,混合现实,zh
+ambient display,环境显示,zh
+tangible interaction,实体交互,zh
+conversational agent,对话式智能体,zh
+voice user interface,语音用户界面,zh
+recommender system,推荐系统,zh

@@ -11,9 +11,13 @@
 
 ## 界面
 
-主界面（浅色）：
+上传前只保留一个拖拽入口，界面上没有任何表单：
 
-![主界面](docs/screenshots/main-light.png)
+![入口界面](docs/screenshots/main-light.png)
+
+拖入 PDF 之后才展开翻译设置，文件列表在上方，随时可以继续添加：
+
+![上传后的工作区](docs/screenshots/studio-work.png)
 
 高级设置（API 地址、Key、输出目录、QPS、提示词等）：
 
@@ -23,9 +27,37 @@
 
 ![深色模式](docs/screenshots/main-dark.png)
 
+翻译完成后进入「结果库」，译文、双语对照、术语表按论文归组，可搜索、排序、重命名、清理：
+
+![结果库](docs/screenshots/library.png)
+
+点开就在应用内阅读，选中正文可高亮，也可以随手放便签写批注：
+
+![阅读与批注](docs/screenshots/reader.png)
+
+术语库自带两套预设（人工智能、交互设计），一键添加即可让全文术语统一：
+
+![术语库与预设](docs/screenshots/glossary.png)
+
 ## 功能
 
-- **拖拽即翻译**：把 PDF 拖进窗口即可，支持多文件、点击选择、自动读取页数。
+- **先上传，再设置**：入口页只有一个拖拽区域，拖入 PDF 后才出现语言、模型、术语库等选项；
+  移除全部文件后平滑回到入口页。
+- **拖拽即翻译**：把 PDF 拖到窗口任意位置即可，支持多文件、点击选择、自动读取页数。
+- **过渡动画**：入口与工作区之间淡入切换、拖拽高亮、文件增删与设置卡片依次浮现，
+  并遵循系统的「减少动态效果」设置。
+- **结果库**：自动把输出目录里的 `_译文` / `_双语对照` / `_术语表` 归到同一篇论文下，
+  支持搜索、按时间 / 名称 / 大小排序、整套重命名、移入回收站、打开所在文件夹，
+  也可以把其它目录加进来一起管理。
+- **内置阅读器**：PDF.js 本地渲染，页面连续滚动（一页接一页，读到页尾自然接上下一页），
+  缩略图导航、缩放、适应宽度 / 适应页面，完全离线；Ctrl + 滚轮缩放，方向键整页跳转，
+  结果卡片一键打开，阅读时不必跳出应用。
+- **阅读批注**：选中正文弹出工具栏，四色高亮（按行合并成连续色带、文字保持清晰，
+  跨页选择会一次性标完整段）；「批注」工具可在页面任意位置放便签并写评论；
+  点侧栏里的批注会直接跳到对应文字并闪一下提示位置；
+  批注按文档保存在本机，侧栏可统一查看 / 跳转 / 删除，也能导出成 Markdown。
+- **预设术语库**：随应用附带「人工智能 · 大模型」（124 条）与「交互设计 · 人机交互」
+  （112 条）两套中英术语，首次启动自动安装，删掉后可在术语库面板一键重新添加。
 - **任意大模型**：OpenAI / DeepSeek / 智谱 GLM / 通义千问 / OpenRouter / Moonshot /
   自定义网关，模型名可手填，API Key 用 Windows DPAPI 加密保存在本机。
 - **页面范围**：全部页或 `1-5,8` 这样的自定义范围。
@@ -84,15 +116,28 @@ core/
   pdfinfo.py            页数 / 大小探测
   picker.py             原生文件选择对话框（独立进程）
   runner.py             调用 babeldoc、流式日志、阶段进度、结果重命名
+  library.py            结果库：扫描 / 分组 / 重命名 / 回收站 / 缩略图
+  annotations.py        阅读批注的本地存储
+  presets.py            预设术语库的安装与去重
+presets/
+  ai-ml.csv             人工智能 · 大模型（124 条，中英对照）
+  hci-ux.csv            交互设计 · 人机交互（112 条）
+  index.json            预设的名称 / 描述 / 来源
 web/
-  index.html            界面结构
-  styles.css            iOS 风格样式（浅色 / 深色自适应）
-  app.js               交互逻辑
+  index.html            翻译界面（入口 + 工作区）
+  styles.css            公共样式（浅色 / 深色自适应）
+  app.js                翻译界面的交互逻辑
+  shared.js             结果库 / 阅读器共用的小工具
+  library.html/.css/.js 结果库页面
+  viewer.html/.css/.js  内置 PDF 阅读器 + 批注
+  pdfjs/                PDF.js 3.11 本地副本（渲染离线可用）
 docs/
   BABELDOC-NOTES.md     BabelDOC 集成笔记（CLI、产物命名、术语格式）
   screenshots/          界面截图
 tests/
   test_smoke.py         命令拼装 / 阶段识别 / 产物重命名的离线测试
+  test_library.py       结果库分组 / 重命名 / 删除、路径白名单、批注读写
+  test_presets.py       预设术语库的列举 / 安装 / 只装一次
 tools/
   make_icon.py          生成应用图标（web/babeldoc.ico）
   create_shortcut.ps1   重建桌面快捷方式
@@ -107,6 +152,10 @@ babeldoc_gui.py         旧版 Tkinter 界面（保留备查）
 | 设置（含加密密钥） | `%APPDATA%\BabelDOC-Studio\settings.json` |
 | 术语库 | `%APPDATA%\BabelDOC-Studio\glossaries\*.csv` |
 | 拖拽上传的临时 PDF | `%APPDATA%\BabelDOC-Studio\uploads\` |
+| 阅读批注 | `%APPDATA%\BabelDOC-Studio\annotations\<文档>.json` |
+| 结果库附加目录 | `%APPDATA%\BabelDOC-Studio\library.json` |
+| 结果库缩略图缓存 | `%APPDATA%\BabelDOC-Studio\thumbs\` |
+| 预设术语库安装记录 | `%APPDATA%\BabelDOC-Studio\presets.json` |
 | 默认输出目录 | `%USERPROFILE%\Documents\BabelDOC-Studio` |
 
 ## 结果文件
@@ -131,6 +180,23 @@ BabelDOC 原始产物形如 `论文.zh.mono.pdf` / `论文.zh.dual.pdf`，本工
   输出仍是 2 页且第 2 页保留英文原文。
 - 费用统计：用本地 mock LLM（每次请求固定 900 输入 / 300 输出 tokens）跑通，
   接口返回 `usage={prompt:1800, completion:600}`、`cost=¥0.0084`（deepseek-chat 参考价）。
+- 结果库：产物分组、整套重命名（批注随文件迁移）、回收站删除、附加目录、路径白名单，
+  以及批注读写均有离线测试（`tests/test_library.py`）；阅读器用样例 PDF 在无头浏览器里
+  跑通选中高亮、便签、批注编辑与刷新后持久化。
+- 预设术语库：列举 / 安装 / 只装一次（删掉不回填）有离线测试（`tests/test_presets.py`）；
+  安装后出现在翻译表单的下拉里，`tgt_lng=zh` 只对中文目标生效。
+- 阅读体验：页面连续滚动，读到页尾直接接上下一页；高亮按字符区间定位，再由实时文本行合并成
+  连续色带，跨页选择一次就能标完；旧批注（176 段碎片矩形）打开时自动升级为字符区间，
+  缩放、翻页后位置依旧准确。
+- 图标：`/favicon.svg` 与 `/favicon.ico` 分别返回 781 B 的矢量图标与 31 KB 的 ICO，
+  应用窗口与任务栏不再退回默认地球图标。
+
+## 术语来源
+
+- `presets/ai-ml.csv` 部分词条参考 Yifan Wang 的
+  [机器学习中英速查表](https://github.com/wangyifan411/ML-English-Chinese-Cheat-Sheet)（MIT 许可），
+  并补充了 Transformer / 大模型相关术语。
+- `presets/hci-ux.csv` 由本项目整理，覆盖 HCI、可用性研究与界面设计常用词。
 
 ## 已知限制
 
@@ -139,4 +205,6 @@ BabelDOC 原始产物形如 `论文.zh.mono.pdf` / `论文.zh.dual.pdf`，本工
 - 多文件翻译共用同一页面范围与同一模型设置。
 - 术语库当前为单选；BabelDOC 支持多文件，UI 后续可扩展。
 - 首次翻译需下载版面分析模型/字体，耗时与网速有关。
+- 阅读器按视口附近渲染页面（前后各约 1 屏），超长文档的远端页面在滚动到时才排版；
+  批注保存在应用自己的数据目录，不会写回 PDF 文件本身，导出为 Markdown 便于粘贴到笔记。
 

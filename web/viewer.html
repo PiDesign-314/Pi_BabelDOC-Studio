@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>阅读 · BabelDOC Studio</title>
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/viewer.css">
+</head>
+<body class="reader">
+
+<header class="r-top">
+  <a class="r-back" id="back-link" href="/library">
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+         stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M10 3.5 5.5 8l4.5 4.5"/>
+    </svg>
+    <span id="back-label">结果库</span>
+  </a>
+
+  <div class="r-doc">
+    <strong id="doc-name">加载中…</strong>
+    <span id="doc-sub"></span>
+  </div>
+
+  <div class="r-tools">
+    <div class="r-group">
+      <button class="r-btn" id="btn-prev" type="button" title="上一页（←）">‹</button>
+      <input id="page-input" class="r-page" type="number" min="1" value="1" aria-label="页码">
+      <span class="r-total" id="page-total">/ 1</span>
+      <button class="r-btn" id="btn-next" type="button" title="下一页（→）">›</button>
+    </div>
+
+    <div class="r-group">
+      <button class="r-btn" id="btn-zoom-out" type="button" title="缩小（-）">−</button>
+      <span class="r-zoom" id="zoom-label">100%</span>
+      <button class="r-btn" id="btn-zoom-in" type="button" title="放大（+）">+</button>
+      <button class="r-btn wide" id="btn-fit" type="button">适应宽度</button>
+    </div>
+
+    <div class="r-group">
+      <button class="r-btn wide" id="btn-note-tool" type="button" aria-pressed="false" title="在页面上添加便签">
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+             stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M11.5 2.5 13.5 4.5 5 13H3v-2z"/>
+        </svg>
+        批注
+      </button>
+      <button class="r-btn wide" id="btn-export" type="button" title="导出批注为 Markdown">导出</button>
+    </div>
+
+    <span class="r-saved" id="save-state"></span>
+
+    <button class="r-btn r-side-toggle" id="btn-sidebar" type="button" aria-pressed="true" title="显示 / 隐藏侧栏">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+        <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2"/>
+        <path d="M6.2 2.8v10.4"/>
+      </svg>
+    </button>
+
+    <button class="icon-btn r-theme" id="btn-theme" type="button" title="切换外观" aria-label="切换外观">
+      <svg class="ico-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/>
+      </svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<div class="r-main">
+  <aside class="r-side" id="sidebar">
+    <div class="r-tabs">
+      <button class="r-tab on" type="button" data-tab="thumbs">页面</button>
+      <button class="r-tab" type="button" data-tab="notes">批注<span class="r-count" id="anno-count">0</span></button>
+    </div>
+    <div class="r-panel r-panel-thumbs" id="panel-thumbs"></div>
+    <div class="r-panel r-panel-notes" id="panel-notes" hidden></div>
+  </aside>
+
+  <main class="r-stage" id="stage">
+    <div class="r-scroll" id="scroll">
+      <div class="r-loading" id="loading">
+        <span class="r-spinner" aria-hidden="true"></span>正在载入 PDF…
+      </div>
+      <div class="r-error" id="error" hidden></div>
+      <div class="r-pages" id="pages" hidden></div>
+    </div>
+  </main>
+</div>
+
+<div class="r-sel" id="sel-toolbar" hidden>
+  <button class="r-dot yellow" type="button" data-color="yellow" title="黄色高亮"></button>
+  <button class="r-dot green" type="button" data-color="green" title="绿色高亮"></button>
+  <button class="r-dot blue" type="button" data-color="blue" title="蓝色高亮"></button>
+  <button class="r-dot pink" type="button" data-color="pink" title="粉色高亮"></button>
+  <span class="r-vsep"></span>
+  <button class="r-sel-action" id="sel-note" type="button">写批注</button>
+  <button class="r-sel-action" id="sel-copy" type="button">复制</button>
+</div>
+
+<div class="r-editor" id="editor" hidden>
+  <div class="r-editor-top">
+    <span class="r-editor-page" id="editor-page"></span>
+    <div class="r-colors" id="editor-colors">
+      <button class="r-dot yellow" type="button" data-color="yellow"></button>
+      <button class="r-dot green" type="button" data-color="green"></button>
+      <button class="r-dot blue" type="button" data-color="blue"></button>
+      <button class="r-dot pink" type="button" data-color="pink"></button>
+    </div>
+    <button class="r-editor-close" id="editor-close" type="button" aria-label="关闭">✕</button>
+  </div>
+  <p class="r-quote" id="editor-quote" hidden></p>
+  <textarea id="editor-text" rows="4" placeholder="写下批注…" spellcheck="false"></textarea>
+  <div class="r-editor-foot">
+    <button class="r-danger" id="editor-delete" type="button">删除</button>
+    <button class="btn btn-primary small" id="editor-done" type="button">完成</button>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="/assets/pdfjs/build/pdf.min.js"></script>
+<script src="/assets/shared.js"></script>
+<script src="/assets/viewer.js"></script>
+</body>
+</html>

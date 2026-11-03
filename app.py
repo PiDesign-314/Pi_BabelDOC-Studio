@@ -22,12 +22,21 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
 
-from core import config, glossary, pdfinfo, providers, runner  # noqa: E402
+from core import (  # noqa: E402
+    annotations,
+    config,
+    glossary,
+    library,
+    pdfinfo,
+    presets,
+    providers,
+    runner,
+)
 from core.languages import LANGUAGES  # noqa: E402
 
 WEB_DIR = BASE_DIR / "web"
@@ -57,6 +66,48 @@ def _no_cache(response):
     if response.mimetype in {"text/html", "application/javascript", "text/css"}:
         response.headers["Cache-Control"] = "no-store"
     return response
+
+
+def _allowed_roots() -> list[Path]:
+    roots: list[Path] = []
+    candidates = [config.UPLOAD_DIR, *[Path(item) for item in library.watched_dirs()]]
+    for path in candidates:
+        try:
+            resolved = path.expanduser().resolve()
+        except OSError:
+            continue
+        if resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def _allowed_file(raw: str, suffixes: tuple[str, ...]) -> Path | None:
+    """Resolve a user supplied path, but only inside folders the app manages."""
+    if not raw:
+        return None
+    try:
+        candidate = Path(str(raw)).expanduser().resolve()
+    except OSError:
+        return None
+    if not candidate.is_file() or candidate.suffix.lower() not in suffixes:
+        return None
+    for root in _allowed_roots():
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            continue
+        return candidate
+    return None
+
+
+def _is_watched_folder(raw: str) -> bool:
+    if not raw:
+        return False
+    try:
+        folder = Path(str(raw)).expanduser().resolve()
+    except OSError:
+        return False
+    return folder in _allowed_roots()
 
 
 def _resolve_exe(settings: dict) -> str | None:
@@ -111,6 +162,16 @@ def index():
     return send_from_directory(WEB_DIR, "index.html")
 
 
+@app.get("/library")
+def library_page():
+    return send_from_directory(WEB_DIR, "library.html")
+
+
+@app.get("/viewer")
+def viewer_page():
+    return send_from_directory(WEB_DIR, "viewer.html")
+
+
 @app.get("/api/health")
 def health():
     return _json({"ok": True, "app": "BabelDOC Studio"})
@@ -123,8 +184,20 @@ def quit_app():
     return _json({"ok": True})
 
 
+@app.get("/favicon.svg")
+def favicon_svg():
+    icon = WEB_DIR / "favicon.svg"
+    if icon.exists():
+        return send_from_directory(WEB_DIR, "favicon.svg", mimetype="image/svg+xml")
+    return ("", 204)
+
+
 @app.get("/favicon.ico")
 def favicon():
+    """Windows taskbar / app windows want a real icon, not an SVG payload."""
+    ico = WEB_DIR / "babeldoc.ico"
+    if ico.exists():
+        return send_from_directory(WEB_DIR, "babeldoc.ico", mimetype="image/x-icon")
     icon = WEB_DIR / "favicon.svg"
     if icon.exists():
         return send_from_directory(WEB_DIR, "favicon.svg", mimetype="image/svg+xml")
@@ -138,6 +211,10 @@ def favicon():
 def bootstrap():
     settings = config.public_settings()
     exe = _resolve_exe(settings)
+    try:
+        presets.ensure_seeded()
+    except Exception:  # a broken preset folder must not block the app
+        pass
     return _json(
         {
             "app": "BabelDOC Studio",
@@ -257,6 +334,32 @@ def import_glossary():
     return _json(result)
 
 
+# --------------------------------------------------------------------------- #
+# Preset glossaries
+# --------------------------------------------------------------------------- #
+@app.get("/api/presets")
+def preset_index():
+    return _json({"presets": presets.list_presets()})
+
+
+@app.post("/api/presets/install")
+def preset_install():
+    payload = request.get_json(silent=True) or {}
+    try:
+        info = presets.install(str(payload.get("id") or ""))
+    except ValueError as exc:
+        return _error(str(exc), 400)
+    except OSError as exc:
+        return _error(f"无法写入术语库：{exc}", 500)
+    return _json(
+        {
+            "glossary": info,
+            "glossaries": glossary.list_glossaries(),
+            "presets": presets.list_presets(),
+        }
+    )
+
+
 @app.delete("/api/glossaries/<name>")
 def remove_glossary(name: str):
     ok = glossary.delete_glossary(name)
@@ -331,6 +434,14 @@ def start_job():
     if not exe:
         return _error("没有找到 babeldoc 命令，请先安装 BabelDOC（uv tool install babeldoc）")
 
+    # Keep earlier results visible in the library if the output folder changes.
+    try:
+        folder = str(Path(cfg["output_dir"]).resolve())
+        if folder not in library.watched_dirs():
+            library.add_dir(folder)
+    except (OSError, ValueError):
+        pass
+
     try:
         job = manager.start(cfg, files, exe)
     except RuntimeError as exc:
@@ -356,6 +467,141 @@ def cancel_job(job_id: str):
     if not ok:
         return _error("任务已经结束", 409)
     return _json({"cancelled": True})
+
+
+# --------------------------------------------------------------------------- #
+# Library (translated results) and reader annotations
+# --------------------------------------------------------------------------- #
+@app.get("/api/library")
+def library_index():
+    query = (request.args.get("q") or "").strip().lower()
+    sort = request.args.get("sort") or "recent"
+    items = library.scan()
+    if query:
+        items = [
+            item
+            for item in items
+            if query in item["name"].lower()
+            or any(query in file["name"].lower() for file in item["files"])
+        ]
+    if sort == "name":
+        items.sort(key=lambda item: item["name"].lower())
+    elif sort == "size":
+        items.sort(key=lambda item: item["size"], reverse=True)
+    return _json(
+        {
+            "items": items,
+            "dirs": library.watched_dirs(),
+            "extra_dirs": library.extra_dirs(),
+        }
+    )
+
+
+@app.get("/api/library/thumb")
+def library_thumb():
+    target = _allowed_file(request.args.get("path", ""), (".pdf",))
+    if not target:
+        return _error("文件不可用", 404)
+    try:
+        width = max(120, min(1200, int(request.args.get("w") or 420)))
+    except ValueError:
+        width = 420
+    data = library.thumbnail(target, width)
+    if not data:
+        return _error("无法生成缩略图", 404)
+    response = Response(data, mimetype="image/png")
+    response.headers["Cache-Control"] = "private, max-age=600"
+    return response
+
+
+@app.get("/api/file")
+def serve_document():
+    target = _allowed_file(request.args.get("path", ""), (".pdf", ".csv"))
+    if not target:
+        return _error("文件不可用", 404)
+    mimetype = "application/pdf" if target.suffix.lower() == ".pdf" else "text/csv"
+    return send_file(
+        target,
+        mimetype=mimetype,
+        conditional=True,
+        download_name=target.name,
+    )
+
+
+@app.post("/api/library/rename")
+def library_rename():
+    payload = request.get_json(silent=True) or {}
+    folder = payload.get("dir") or ""
+    if not _is_watched_folder(folder):
+        return _error("文件夹不在资料库中", 400)
+    try:
+        result = library.rename(folder, payload.get("name") or "", payload.get("new_name") or "")
+    except FileExistsError as exc:
+        return _error(f"已存在同名文件：{exc}", 409)
+    except FileNotFoundError as exc:
+        return _error(str(exc), 404)
+    except ValueError as exc:
+        return _error(str(exc), 400)
+    except OSError as exc:
+        return _error(f"重命名失败：{exc}", 500)
+    return _json(result)
+
+
+@app.post("/api/library/delete")
+def library_delete():
+    payload = request.get_json(silent=True) or {}
+    folder = payload.get("dir") or ""
+    if not _is_watched_folder(folder):
+        return _error("文件夹不在资料库中", 400)
+    try:
+        result = library.delete(folder, payload.get("name") or "")
+    except FileNotFoundError as exc:
+        return _error(str(exc), 404)
+    except OSError as exc:
+        return _error(f"删除失败：{exc}", 500)
+    return _json(result)
+
+
+@app.post("/api/library/dirs")
+def library_add_dir():
+    payload = request.get_json(silent=True) or {}
+    try:
+        dirs = library.add_dir(payload.get("path") or "")
+    except ValueError as exc:
+        return _error(str(exc), 400)
+    return _json({"dirs": dirs})
+
+
+@app.delete("/api/library/dirs")
+def library_remove_dir():
+    payload = request.get_json(silent=True) or {}
+    return _json({"dirs": library.remove_dir(payload.get("path") or "")})
+
+
+@app.get("/api/annotations")
+def get_annotations():
+    target = _allowed_file(request.args.get("path", ""), (".pdf",))
+    if not target:
+        return _error("文件不可用", 404)
+    data = annotations.load(target)
+    data["path"] = str(target)
+    data["doc_id"] = annotations.document_id(target)
+    return _json(data)
+
+
+@app.post("/api/annotations")
+def save_annotations():
+    payload = request.get_json(silent=True) or {}
+    target = _allowed_file(payload.get("path", ""), (".pdf",))
+    if not target:
+        return _error("文件不可用", 404)
+    try:
+        data = annotations.save(target, payload.get("items") or [])
+    except OSError as exc:
+        return _error(str(exc), 500)
+    data["path"] = str(target)
+    data["doc_id"] = annotations.document_id(target)
+    return _json(data)
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "ai-ml",
+    "file": "ai-ml.csv",
+    "name": "人工智能 · 大模型",
+    "description": "机器学习、深度学习与大模型常用术语，翻译 AI 论文时自动统一译法。",
+    "source": "部分词条参考 Yifan Wang 的机器学习中英词表（MIT 许可），并补充 Transformer / 大模型相关术语。"
+  },
+  {
+    "id": "hci-ux",
+    "file": "hci-ux.csv",
+    "name": "交互设计 · 人机交互",
+    "description": "HCI、UX 研究方法与界面设计术语，适合交互设计和 CHI 类论文。",
+    "source": "本项目整理。"
+  }
+]

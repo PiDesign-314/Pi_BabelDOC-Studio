@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>BabelDOC Studio</title>
+<link rel="icon" href="/favicon.ico" sizes="32x32">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/styles.css">
 </head>
-<body>
+<body data-stage="entry">
 <div class="shell">
 
   <header class="topbar">
@@ -28,6 +29,13 @@
       </div>
     </div>
     <div class="topbar-right">
+      <a class="pill-btn" href="/library" title="翻译结果、阅读与批注">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+          <path d="M1.9 4.3h4.2l1.2 1.4h6.8v6.4a1.1 1.1 0 0 1-1.1 1.1H3a1.1 1.1 0 0 1-1.1-1.1z"/>
+        </svg>
+        结果库
+      </a>
       <button class="icon-btn" id="btn-theme" type="button" title="切换外观" aria-label="切换外观">
         <svg class="ico-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
              stroke-width="1.7" stroke-linecap="round">
@@ -45,279 +53,322 @@
 
   <main class="content">
 
-    <!-- ------------------------------------------------------------- files -->
-    <section class="card drop-card">
-      <div class="drop-zone" id="drop-zone" tabindex="0" role="button"
-           aria-label="拖拽 PDF 到此处，或点击选择文件">
-        <div class="drop-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor"
-               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/>
-            <path d="M4 15v3.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V15"/>
-          </svg>
+    <!-- ------------------------------------------------------------ entry --
+         上传前只显示这一个拖拽入口；设置项在上传后（.stage-work）才出现。 -->
+    <section class="stage stage-entry" id="stage-entry" aria-label="添加 PDF">
+      <div class="hero">
+        <div class="hero-aura" aria-hidden="true">
+          <span class="aura aura-a"></span>
+          <span class="aura aura-b"></span>
         </div>
-        <div class="drop-copy">
-          <strong>把 PDF 拖到这里</strong>
-          <span>支持多个文件 · 点击也可选择</span>
+
+        <span class="hero-badge">
+          <i class="beacon" aria-hidden="true"></i>本地运行 · 密钥不出本机
+        </span>
+
+        <h2 class="hero-title">
+          把 PDF 拖进来<br>
+          <span class="grad">版式照旧</span>，只换语言
+        </h2>
+        <p class="hero-sub">公式、图表、双栏与页码都留在原位，译文以双语对照呈现。</p>
+
+        <div class="hero-drop" id="hero-drop" role="button" tabindex="0"
+             aria-label="拖拽 PDF 到此处，或点击选择文件">
+          <span class="hero-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor"
+                 stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3.5v11"/>
+              <path d="m7.5 10.5 4.5 4.5 4.5-4.5"/>
+              <path d="M4 15.4v2.7A2.9 2.9 0 0 0 6.9 21h10.2a2.9 2.9 0 0 0 2.9-2.9v-2.7"/>
+            </svg>
+          </span>
+          <strong class="hero-drop-title" id="hero-drop-title">拖拽 PDF 到此处</strong>
+          <span class="hero-drop-sub">或点击选择文件 · 支持一次拖入多个</span>
+          <span class="hero-chips" aria-hidden="true">
+            <span>保留排版</span><span>双语对照</span><span>术语统一</span>
+          </span>
         </div>
-        <button class="btn btn-secondary" id="btn-choose" type="button">选择文件</button>
-        <input type="file" id="file-input" accept="application/pdf,.pdf" multiple hidden>
+
+        <p class="hero-foot">上传后再挑选语言、翻译模型与术语库</p>
       </div>
-      <div class="file-list" id="file-list" hidden></div>
     </section>
 
-    <!-- ---------------------------------------------------------- settings -->
-    <section class="card">
-      <div class="card-head">
-        <h2>翻译设置</h2>
-        <button class="btn btn-ghost" id="btn-advanced" type="button" aria-expanded="false">
-          高级设置
-          <svg class="chev" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true">
-            <path d="M1 1.5 6 6.5l5-5" fill="none" stroke="currentColor" stroke-width="1.8"
-                  stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-      </div>
+    <!-- ------------------------------------------------------------- work --
+         加入文件后整块出现：文件 / 设置 / 开始 / 结果。 -->
+    <div class="stage stage-work" id="stage-work" hidden>
 
-      <div class="grid">
-        <div class="field">
-          <label for="lang-out">目标语言</label>
-          <div class="select-wrap">
-            <select id="lang-out"></select>
+      <section class="card drop-card">
+        <div class="drop-zone" id="drop-zone" tabindex="0" role="button"
+             aria-label="继续添加 PDF 文件">
+          <div class="drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor"
+                 stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/>
+              <path d="M4 15v3.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V15"/>
+            </svg>
           </div>
+          <div class="drop-copy">
+            <strong>继续添加 PDF</strong>
+            <span>拖拽到窗口任意位置，或点击选择文件</span>
+          </div>
+          <button class="btn btn-secondary" id="btn-choose" type="button">选择文件</button>
         </div>
+        <div class="file-list" id="file-list" hidden></div>
+      </section>
 
-        <div class="field">
-          <label for="provider">翻译服务</label>
-          <div class="select-wrap">
-            <select id="provider"></select>
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="model">模型</label>
-          <div class="select-wrap">
-            <input id="model" list="model-options" placeholder="选择或输入模型名称" spellcheck="false">
-            <datalist id="model-options"></datalist>
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="page-mode">页面范围</label>
-          <div class="select-wrap">
-            <select id="page-mode"></select>
-            <input id="page-range" class="inline-input" placeholder="例如 1-5,8" spellcheck="false" hidden>
-          </div>
+      <section class="card">
+        <div class="card-head">
+          <h2>翻译设置</h2>
+          <button class="btn btn-ghost" id="btn-advanced" type="button" aria-expanded="false">
+            高级设置
+            <svg class="chev" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true">
+              <path d="M1 1.5 6 6.5l5-5" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
         </div>
 
-        <div class="field">
-          <label for="dual-mode">双语对照显示方式</label>
-          <div class="select-wrap">
-            <select id="dual-mode">
-              <option value="side">左右对照：原文 | 译文</option>
-              <option value="alternate">交替页：原文 / 译文</option>
-              <option value="mono">仅译文</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="glossary">术语库</label>
-          <div class="select-wrap">
-            <select id="glossary"></select>
-            <button class="inline-action" id="btn-glossary" type="button" title="管理术语库">管理</button>
-          </div>
-        </div>
-
-        <div class="field toggle-field">
-          <div class="toggle-row">
-            <div>
-              <label class="toggle-label" for="auto-glossary">自动提取术语</label>
-              <p class="hint">翻译前自动识别专有名词并统一译法</p>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="auto-glossary" checked>
-              <span class="track"></span>
-            </label>
-          </div>
-        </div>
-
-        <div class="field toggle-field">
-          <div class="toggle-row">
-            <div>
-              <label class="toggle-label" for="save-glossary">保存自动术语表</label>
-              <p class="hint">把提取结果另存为 CSV，方便复用</p>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="save-glossary" checked>
-              <span class="track"></span>
-            </label>
-          </div>
-        </div>
-        <div class="field wide toggle-field">
-          <div class="toggle-row">
-            <div>
-              <label class="toggle-label" for="skip-references">不翻译参考文献</label>
-              <p class="hint">自动定位 References / 参考文献，从该页起保留原文（可在高级设置中手动指定页码）</p>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="skip-references" checked>
-              <span class="track"></span>
-            </label>
-          </div>
-        </div>
-      </div>
-      <div class="advanced" id="advanced" hidden>
-        <div class="divider"></div>
         <div class="grid">
           <div class="field">
-            <label for="lang-in">源语言</label>
-            <div class="select-wrap"><select id="lang-in"></select></div>
-          </div>
-
-          <div class="field">
-            <label for="output-dir">输出目录</label>
+            <label for="lang-out">目标语言</label>
             <div class="select-wrap">
-              <input id="output-dir" spellcheck="false">
-              <button class="inline-action" id="btn-output" type="button">浏览</button>
+              <select id="lang-out"></select>
             </div>
           </div>
 
           <div class="field">
-            <label for="base-url">API 地址</label>
+            <label for="provider">翻译服务</label>
             <div class="select-wrap">
-              <input id="base-url" placeholder="https://…/v1" spellcheck="false">
+              <select id="provider"></select>
             </div>
           </div>
 
           <div class="field">
-            <label for="api-key">API Key</label>
+            <label for="model">模型</label>
             <div class="select-wrap">
-              <input id="api-key" type="password" placeholder="sk-…" spellcheck="false"
-                     autocomplete="off">
-              <button class="inline-action" id="btn-reveal" type="button">显示</button>
+              <input id="model" list="model-options" placeholder="选择或输入模型名称" spellcheck="false">
+              <datalist id="model-options"></datalist>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="page-mode">页面范围</label>
+            <div class="select-wrap">
+              <select id="page-mode"></select>
+              <input id="page-range" class="inline-input" placeholder="例如 1-5,8" spellcheck="false" hidden>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="dual-mode">双语对照显示方式</label>
+            <div class="select-wrap">
+              <select id="dual-mode">
+                <option value="side">左右对照：原文 | 译文</option>
+                <option value="alternate">交替页：原文 / 译文</option>
+                <option value="mono">仅译文</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="glossary">术语库</label>
+            <div class="select-wrap">
+              <select id="glossary"></select>
+              <button class="inline-action" id="btn-glossary" type="button" title="管理术语库">管理</button>
             </div>
           </div>
 
           <div class="field toggle-field">
             <div class="toggle-row">
               <div>
-                <label class="toggle-label" for="remember-key">记住 Key</label>
-                <p class="hint">用 Windows DPAPI 加密，仅本机可解密</p>
+                <label class="toggle-label" for="auto-glossary">自动提取术语</label>
+                <p class="hint">翻译前自动识别专有名词并统一译法</p>
               </div>
               <label class="switch">
-                <input type="checkbox" id="remember-key">
+                <input type="checkbox" id="auto-glossary" checked>
                 <span class="track"></span>
               </label>
             </div>
           </div>
 
-          <div class="field">
-            <label for="qps">并发 QPS</label>
-            <div class="select-wrap"><input id="qps" type="number" min="1" max="200" step="1"></div>
-          </div>
-
-          <div class="field">
-            <label for="watermark">水印</label>
-            <div class="select-wrap">
-              <select id="watermark">
-                <option value="no_watermark">不加水印</option>
-                <option value="watermarked">加水印</option>
-                <option value="both">两种都生成</option>
-              </select>
+          <div class="field toggle-field">
+            <div class="toggle-row">
+              <div>
+                <label class="toggle-label" for="save-glossary">保存自动术语表</label>
+                <p class="hint">把提取结果另存为 CSV，方便复用</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="save-glossary" checked>
+                <span class="track"></span>
+              </label>
             </div>
           </div>
-
-          <div class="field">
-            <label for="term-model">术语提取模型（可选）</label>
-            <div class="select-wrap">
-              <input id="term-model" placeholder="留空则与翻译模型相同" spellcheck="false">
+          <div class="field wide toggle-field">
+            <div class="toggle-row">
+              <div>
+                <label class="toggle-label" for="skip-references">不翻译参考文献</label>
+                <p class="hint">自动定位 References / 参考文献，从该页起保留原文（可在高级设置中手动指定页码）</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="skip-references" checked>
+                <span class="track"></span>
+              </label>
             </div>
-          </div>
-
-          <div class="field">
-            <label for="reference-page">参考文献起始页（可选）</label>
-            <div class="select-wrap">
-              <input id="reference-page" type="number" min="1" placeholder="留空则自动识别">
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="price-input">输入价格（每百万 tokens）</label>
-            <div class="select-wrap">
-              <input id="price-input" type="number" min="0" step="0.01" placeholder="留空用内置参考价">
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="price-output">输出价格（每百万 tokens）</label>
-            <div class="select-wrap">
-              <input id="price-output" type="number" min="0" step="0.01" placeholder="留空用内置参考价">
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="price-currency">计价货币</label>
-            <div class="select-wrap">
-              <select id="price-currency">
-                <option value="">自动（按服务商）</option>
-                <option value="CNY">人民币 ¥</option>
-                <option value="USD">美元 $</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="field wide">
-            <label for="custom-prompt">自定义系统提示词（可选）</label>
-            <textarea id="custom-prompt" rows="3"
-                      placeholder="例如：这是一篇计算机视觉论文，术语请保持学术习惯…"></textarea>
-          </div>
-
-          <div class="field wide inline-toggles">
-            <label class="check"><input type="checkbox" id="skip-scanned"> 跳过扫描件检测（更快）</label>
-            <label class="check"><input type="checkbox" id="ocr-workaround"> OCR 兼容模式</label>
-            <label class="check"><input type="checkbox" id="open-when-done" checked> 完成后打开输出目录</label>
           </div>
         </div>
+        <div class="advanced" id="advanced" hidden>
+          <div class="divider"></div>
+          <div class="grid">
+            <div class="field">
+              <label for="lang-in">源语言</label>
+              <div class="select-wrap"><select id="lang-in"></select></div>
+            </div>
 
-        <div class="test-row">
-          <button class="btn btn-secondary" id="btn-test" type="button">测试连接</button>
-          <span class="test-result" id="test-result"></span>
+            <div class="field">
+              <label for="output-dir">输出目录</label>
+              <div class="select-wrap">
+                <input id="output-dir" spellcheck="false">
+                <button class="inline-action" id="btn-output" type="button">浏览</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="base-url">API 地址</label>
+              <div class="select-wrap">
+                <input id="base-url" placeholder="https://…/v1" spellcheck="false">
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="api-key">API Key</label>
+              <div class="select-wrap">
+                <input id="api-key" type="password" placeholder="sk-…" spellcheck="false"
+                       autocomplete="off">
+                <button class="inline-action" id="btn-reveal" type="button">显示</button>
+              </div>
+            </div>
+
+            <div class="field toggle-field">
+              <div class="toggle-row">
+                <div>
+                  <label class="toggle-label" for="remember-key">记住 Key</label>
+                  <p class="hint">用 Windows DPAPI 加密，仅本机可解密</p>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="remember-key">
+                  <span class="track"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="qps">并发 QPS</label>
+              <div class="select-wrap"><input id="qps" type="number" min="1" max="200" step="1"></div>
+            </div>
+
+            <div class="field">
+              <label for="watermark">水印</label>
+              <div class="select-wrap">
+                <select id="watermark">
+                  <option value="no_watermark">不加水印</option>
+                  <option value="watermarked">加水印</option>
+                  <option value="both">两种都生成</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="term-model">术语提取模型（可选）</label>
+              <div class="select-wrap">
+                <input id="term-model" placeholder="留空则与翻译模型相同" spellcheck="false">
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="reference-page">参考文献起始页（可选）</label>
+              <div class="select-wrap">
+                <input id="reference-page" type="number" min="1" placeholder="留空则自动识别">
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="price-input">输入价格（每百万 tokens）</label>
+              <div class="select-wrap">
+                <input id="price-input" type="number" min="0" step="0.01" placeholder="留空用内置参考价">
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="price-output">输出价格（每百万 tokens）</label>
+              <div class="select-wrap">
+                <input id="price-output" type="number" min="0" step="0.01" placeholder="留空用内置参考价">
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="price-currency">计价货币</label>
+              <div class="select-wrap">
+                <select id="price-currency">
+                  <option value="">自动（按服务商）</option>
+                  <option value="CNY">人民币 ¥</option>
+                  <option value="USD">美元 $</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field wide">
+              <label for="custom-prompt">自定义系统提示词（可选）</label>
+              <textarea id="custom-prompt" rows="3"
+                        placeholder="例如：这是一篇计算机视觉论文，术语请保持学术习惯…"></textarea>
+            </div>
+
+            <div class="field wide inline-toggles">
+              <label class="check"><input type="checkbox" id="skip-scanned"> 跳过扫描件检测（更快）</label>
+              <label class="check"><input type="checkbox" id="ocr-workaround"> OCR 兼容模式</label>
+              <label class="check"><input type="checkbox" id="open-when-done" checked> 完成后打开输出目录</label>
+            </div>
+          </div>
+
+          <div class="test-row">
+            <button class="btn btn-secondary" id="btn-test" type="button">测试连接</button>
+            <span class="test-result" id="test-result"></span>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ------------------------------------------------------------ action -->
-    <section class="card action-card">
-      <div class="progress-block" id="progress-block" hidden>
-        <div class="progress-top">
-          <span class="stage" id="stage">准备中</span>
-          <span class="percent" id="percent">0%</span>
-        </div>
-        <div class="bar"><div class="bar-fill" id="bar-fill"></div></div>
-        <button class="log-toggle" id="btn-log" type="button" aria-expanded="false">
-          运行日志 <span class="chev">›</span>
-        </button>
-        <pre class="log" id="log" hidden></pre>
-      </div>
-
-      <div class="action-row">
-        <div class="summary" id="summary">还没有添加文件</div>
-        <div class="action-buttons">
-          <button class="btn btn-secondary" id="btn-cancel" type="button" hidden>取消</button>
-          <button class="btn btn-primary" id="btn-start" type="button" disabled>
-            开始翻译
+      <section class="card action-card">
+        <div class="progress-block" id="progress-block" hidden>
+          <div class="progress-top">
+            <span class="stage" id="stage">准备中</span>
+            <span class="percent" id="percent">0%</span>
+          </div>
+          <div class="bar"><div class="bar-fill" id="bar-fill"></div></div>
+          <button class="log-toggle" id="btn-log" type="button" aria-expanded="false">
+            运行日志 <span class="chev">›</span>
           </button>
+          <pre class="log" id="log" hidden></pre>
         </div>
-      </div>
-      <div class="usage-line" id="usage-line" hidden></div>
-    </section>
 
-    <!-- ----------------------------------------------------------- results -->
-    <section class="card result-card" id="result-card" hidden>
-      <div class="card-head"><h2>翻译结果</h2></div>
-      <div class="result-list" id="result-list"></div>
-    </section>
+        <div class="action-row">
+          <div class="summary" id="summary">还没有添加文件</div>
+          <div class="action-buttons">
+            <button class="btn btn-secondary" id="btn-cancel" type="button" hidden>取消</button>
+            <button class="btn btn-primary" id="btn-start" type="button" disabled>
+              开始翻译
+            </button>
+          </div>
+        </div>
+        <div class="usage-line" id="usage-line" hidden></div>
+      </section>
+
+      <section class="card result-card" id="result-card" hidden>
+        <div class="card-head">
+          <h2>翻译结果</h2>
+          <a class="btn btn-ghost" href="/library">全部结果 →</a>
+        </div>
+        <div class="result-list" id="result-list"></div>
+      </section>
+    </div>
 
   </main>
 
@@ -337,6 +388,14 @@
       <button class="icon-close" id="btn-glossary-close" type="button" aria-label="关闭">✕</button>
     </div>
     <div class="modal-body">
+      <div class="preset-block">
+        <div class="field-head">
+          <h3>预设术语库</h3>
+          <span class="hint">一键添加，翻译时自动套用统一译法</span>
+        </div>
+        <div class="preset-list" id="preset-list"></div>
+      </div>
+
       <div class="glossary-list" id="glossary-list"></div>
 
       <div class="glossary-editor">
@@ -359,6 +418,7 @@
   </div>
 </div>
 
+<input type="file" id="file-input" accept="application/pdf,.pdf" multiple hidden>
 <div class="toasts" id="toasts"></div>
 <script src="/assets/app.js"></script>
 </body>

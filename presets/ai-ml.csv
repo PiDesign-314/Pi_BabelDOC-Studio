@@ -1,0 +1,125 @@
+source,target,tgt_lng
+machine learning,机器学习,zh
+deep learning,深度学习,zh
+neural network,神经网络,zh
+artificial intelligence,人工智能,zh
+supervised learning,监督学习,zh
+unsupervised learning,无监督学习,zh
+semi-supervised learning,半监督学习,zh
+self-supervised learning,自监督学习,zh
+reinforcement learning,强化学习,zh
+transfer learning,迁移学习,zh
+representation learning,表示学习,zh
+feature,特征,zh
+feature selection,特征选择,zh
+training set,训练集,zh
+validation set,验证集,zh
+test set,测试集,zh
+training error,训练误差,zh
+generalization,泛化,zh
+overfitting,过拟合,zh
+underfitting,欠拟合,zh
+regularization,正则化,zh
+hyperparameter,超参数,zh
+loss function,损失函数,zh
+objective function,目标函数,zh
+gradient descent,梯度下降,zh
+learning rate,学习率,zh
+mini-batch,小批量,zh
+epoch,训练轮次,zh
+iteration,迭代,zh
+backpropagation,反向传播,zh
+activation function,激活函数,zh
+early stopping,早停,zh
+embedding,嵌入,zh
+latent space,潜在空间,zh
+dimensionality reduction,降维,zh
+principal component analysis,主成分分析,zh
+clustering,聚类,zh
+classification,分类,zh
+regression,回归,zh
+classifier,分类器,zh
+confusion matrix,混淆矩阵,zh
+precision,精确率,zh
+recall,召回率,zh
+accuracy,准确率,zh
+cross-validation,交叉验证,zh
+benchmark,基准,zh
+ablation study,消融实验,zh
+baseline,基线,zh
+ground truth,真实标注,zh
+annotation,标注,zh
+dataset,数据集,zh
+data augmentation,数据增强,zh
+bias,偏差,zh
+variance,方差,zh
+distribution shift,分布偏移,zh
+convolutional neural network,卷积神经网络,zh
+recurrent neural network,循环神经网络,zh
+long short-term memory,长短期记忆网络,zh
+gated recurrent unit,门控循环单元,zh
+transformer,变换器,zh
+attention mechanism,注意力机制,zh
+self-attention,自注意力,zh
+multi-head attention,多头注意力,zh
+encoder-decoder,编码器—解码器,zh
+residual connection,残差连接,zh
+layer normalization,层归一化,zh
+feed-forward network,前馈网络,zh
+positional encoding,位置编码,zh
+token,词元,zh
+tokenizer,分词器,zh
+vocabulary,词表,zh
+context window,上下文窗口,zh
+autoregressive,自回归,zh
+generative adversarial network,生成对抗网络,zh
+diffusion model,扩散模型,zh
+variational autoencoder,变分自编码器,zh
+multimodal,多模态,zh
+vision transformer,视觉变换器,zh
+large language model,大语言模型,zh
+foundation model,基础模型,zh
+pretraining,预训练,zh
+fine-tuning,微调,zh
+instruction tuning,指令微调,zh
+prompt,提示词,zh
+prompt engineering,提示词工程,zh
+in-context learning,上下文学习,zh
+few-shot learning,少样本学习,zh
+zero-shot,零样本,zh
+chain-of-thought,思维链,zh
+retrieval-augmented generation,检索增强生成,zh
+hallucination,幻觉,zh
+alignment,对齐,zh
+reinforcement learning from human feedback,基于人类反馈的强化学习,zh
+agent,智能体,zh
+tool use,工具调用,zh
+reasoning,推理,zh
+inference,推断,zh
+temperature,温度参数,zh
+decoding,解码,zh
+beam search,束搜索,zh
+perplexity,困惑度,zh
+scaling law,缩放定律,zh
+parameter-efficient fine-tuning,参数高效微调,zh
+low-rank adaptation,低秩适配,zh
+quantization,量化,zh
+knowledge distillation,知识蒸馏,zh
+context length,上下文长度,zh
+embedding model,嵌入模型,zh
+vector database,向量数据库,zh
+semantic search,语义检索,zh
+agentic workflow,智能体工作流,zh
+natural language processing,自然语言处理,zh
+named entity recognition,命名实体识别,zh
+machine translation,机器翻译,zh
+text summarization,文本摘要,zh
+question answering,问答,zh
+sentiment analysis,情感分析,zh
+human evaluation,人工评估,zh
+inter-annotator agreement,标注者一致性,zh
+annotation guideline,标注规范,zh
+evaluation metric,评价指标,zh
+state of the art,当前最佳,zh
+model checkpoint,模型检查点,zh
+open-weight model,开放权重模型,zh

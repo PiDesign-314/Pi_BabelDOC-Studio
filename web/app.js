@@ -16,10 +16,17 @@
     glossaries: [],
     providerModels: {},
     saveTimer: null,
+    stage: "entry",
+    stageTimer: null,
+    firstRun: false,
   };
 
   const el = {
     btnTheme: $("#btn-theme"),
+    stageEntry: $("#stage-entry"),
+    stageWork: $("#stage-work"),
+    heroDrop: $("#hero-drop"),
+    heroDropTitle: $("#hero-drop-title"),
     enginePill: $("#engine-pill"),
     engineText: $("#engine-text"),
     enginePath: $("#engine-path"),
@@ -76,6 +83,7 @@
     toasts: $("#toasts"),
     glossaryModal: $("#glossary-modal"),
     glossaryList: $("#glossary-list"),
+    presetList: $("#preset-list"),
     glossaryName: $("#glossary-name"),
     glossaryEntries: $("#glossary-entries"),
     glossaryCount: $("#glossary-count"),
@@ -153,6 +161,91 @@
     return state.files.reduce((sum, item) => sum + (item.pages || 0), 0);
   }
 
+  function prefersReducedMotion() {
+    return Boolean(
+      window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
+  }
+
+  function pulse(node) {
+    if (!node || prefersReducedMotion()) return;
+    node.classList.remove("bump");
+    void node.offsetWidth;
+    node.classList.add("bump");
+    node.addEventListener("animationend", () => node.classList.remove("bump"), { once: true });
+  }
+
+  function spawnRipple(x, y) {
+    if (prefersReducedMotion()) return;
+    const node = document.createElement("span");
+    node.className = "ripple";
+    node.style.left = `${x}px`;
+    node.style.top = `${y}px`;
+    document.body.appendChild(node);
+    node.addEventListener("animationend", () => node.remove(), { once: true });
+    setTimeout(() => node.remove(), 1000);
+  }
+
+  /* ------------------------------------------------------------- stages --
+   * "entry"  — nothing uploaded yet, only the single drop target is shown.
+   * "work"   — files present, the settings/action/results cards fade in.
+   */
+  const STAGE_OUT_MS = 190;
+  const ENTRANCE_MS = 1100;
+  let entranceTimer = null;
+
+  function showStage(next, options = {}) {
+    if (state.stage === next) return;
+    const animate = options.animate !== false;
+    const target = next === "work" ? el.stageWork : el.stageEntry;
+    const other = next === "work" ? el.stageEntry : el.stageWork;
+    state.stage = next;
+    document.body.dataset.stage = next;
+    clearTimeout(state.stageTimer);
+
+    const reveal = () => {
+      other.hidden = true;
+      other.classList.remove("stage-leaving", "stage-enter");
+      target.hidden = false;
+      target.classList.remove("stage-enter");
+      void target.offsetWidth; /* restart the entrance animations */
+      if (animate) {
+        target.classList.add("stage-enter");
+        clearTimeout(entranceTimer);
+        entranceTimer = setTimeout(() => target.classList.remove("stage-enter"), ENTRANCE_MS);
+      }
+      if (next === "work") afterWorkReveal();
+      window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    };
+
+    if (!animate || prefersReducedMotion()) {
+      reveal();
+      return;
+    }
+    other.classList.remove("stage-enter");
+    other.classList.add("stage-leaving");
+    state.stageTimer = setTimeout(reveal, STAGE_OUT_MS);
+  }
+
+  function syncStage() {
+    showStage(state.files.length ? "work" : "entry");
+  }
+
+  function openAdvanced() {
+    el.advanced.hidden = false;
+    el.btnAdvanced.setAttribute("aria-expanded", "true");
+  }
+
+  /* First run: the API key cannot be filled in before a file exists, so the
+     advanced panel opens right after the first upload instead of on boot. */
+  function afterWorkReveal() {
+    if (state.firstRun || location.hash === "#advanced") {
+      openAdvanced();
+      if (state.firstRun) setTimeout(() => el.apiKey.focus(), 300);
+      state.firstRun = false;
+    }
+  }
+
   /* ------------------------------------------------------------- render -- */
   function renderLanguages() {
     const options = state.boot.languages
@@ -197,10 +290,12 @@
   function renderPageModeOptions() {
     const pages = totalPages();
     const suffix = pages ? `（共 ${pages} 页）` : "";
+    const current = el.pageMode.value;
     el.pageMode.innerHTML = [
       `<option value="all">全部页${suffix}</option>`,
       '<option value="custom">自定义范围…</option>',
     ].join("");
+    if (current === "custom") el.pageMode.value = "custom";
   }
 
   function renderFiles() {
@@ -214,23 +309,49 @@
     el.fileList.innerHTML = state.files
       .map(
         (file, index) => `
-        <div class="file-row">
+        <div class="file-row" data-path="${escapeHtml(file.path)}" style="--i:${index}">
           <div class="file-badge">PDF</div>
           <div class="file-body">
             <div class="file-name" title="${escapeHtml(file.path)}">${escapeHtml(file.name)}</div>
             <div class="file-meta">${file.pages ? `${file.pages} 页` : "页数未知"} · ${formatSize(file.size)}</div>
           </div>
-          <button class="file-remove" type="button" data-index="${index}" title="移除">✕</button>
+          <button class="file-remove" type="button" title="移除">✕</button>
         </div>`
       )
       .join("");
     $$(".file-remove", el.fileList).forEach((button) => {
-      button.addEventListener("click", () => {
-        state.files.splice(Number(button.dataset.index), 1);
-        renderFiles();
-        refreshSummary();
-      });
+      button.addEventListener("click", () => removeFile(button.closest(".file-row")));
     });
+  }
+
+  function removeFile(row) {
+    if (!row) return;
+    if (state.running) {
+      toast("翻译进行中，先取消任务再移除文件", "bad");
+      return;
+    }
+    const path = row.dataset.path || "";
+    if (!state.files.some((file) => file.path === path)) return;
+
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      const index = state.files.findIndex((file) => file.path === path);
+      if (index >= 0) state.files.splice(index, 1);
+      renderFiles();
+      refreshSummary();
+      syncStage();
+      persistFiles();
+    };
+
+    if (prefersReducedMotion()) {
+      finish();
+      return;
+    }
+    row.classList.add("removing");
+    row.addEventListener("animationend", finish, { once: true });
+    setTimeout(finish, 260);
   }
 
   function escapeHtml(text) {
@@ -250,6 +371,7 @@
     }
     el.btnStart.disabled = !state.files.length || state.running;
     renderPageModeOptions();
+    if (state.files.length) pulse(el.summary);
   }
 
   function renderEngine(info) {
@@ -383,9 +505,50 @@
     if (added) {
       renderFiles();
       refreshSummary();
+      syncStage();
+      persistFiles();
       toast(`已添加 ${added} 个文件`, "good");
     }
     return added;
+  }
+
+  /* ------------------------------------------------------ session restore --
+   * Opening 结果库 / 阅读器 leaves this page; keep the chosen files so coming
+   * back to the same window lands on the same work state. */
+  const FILE_KEY = "babeldoc-open-files";
+
+  function persistFiles() {
+    try {
+      sessionStorage.setItem(
+        FILE_KEY,
+        JSON.stringify(state.files.map((file) => file.path))
+      );
+    } catch {
+      /* storage may be unavailable — restoring is only a convenience */
+    }
+  }
+
+  async function restoreFiles() {
+    if (state.files.length) return;
+    let paths = [];
+    try {
+      const raw = JSON.parse(sessionStorage.getItem(FILE_KEY) || "[]");
+      if (Array.isArray(raw)) paths = raw.filter((item) => typeof item === "string");
+    } catch {
+      return;
+    }
+    if (!paths.length) return;
+    try {
+      const result = await api("/api/inspect", { method: "POST", body: { paths } });
+      const files = result.files || [];
+      if (!files.length) return;
+      state.files = files;
+      renderFiles();
+      refreshSummary();
+      syncStage();
+    } catch {
+      /* ignore: the file may have moved away */
+    }
   }
 
   async function pickFiles() {
@@ -414,6 +577,86 @@
     } catch (error) {
       toast(error.message, "bad");
     }
+  }
+
+  /* --------------------------------------------------------------- drag --
+   * Dragging is tracked on the document so a file dropped anywhere over the
+   * window still lands in whichever drop target is currently on screen. */
+  let dragDepth = 0;
+  let dragResetTimer = null;
+
+  function endDrag() {
+    dragDepth = 0;
+    clearTimeout(dragResetTimer);
+    setDragActive(false);
+  }
+
+  function hasFiles(event) {
+    const transfer = event.dataTransfer;
+    if (!transfer) return false;
+    const types = transfer.types ? Array.from(transfer.types) : [];
+    return types.includes("Files") || Boolean(transfer.files && transfer.files.length);
+  }
+
+  function setDragActive(active) {
+    document.body.classList.toggle("is-drag", active);
+    [el.heroDrop, el.dropZone].forEach((zone) => {
+      if (zone) zone.classList.toggle("is-over", active);
+    });
+    if (el.heroDropTitle) {
+      el.heroDropTitle.textContent = active ? "松开即可添加" : "拖拽 PDF 到此处";
+    }
+  }
+
+  function activeDropZone() {
+    return state.stage === "work" ? el.dropZone : el.heroDrop;
+  }
+
+  function handleDrop(event) {
+    const files = event.dataTransfer && event.dataTransfer.files;
+    if (!files || !files.length) return;
+    const zone = activeDropZone();
+    if (zone) {
+      zone.classList.add("is-accept");
+      setTimeout(() => zone.classList.remove("is-accept"), 520);
+    }
+    if (event.clientX || event.clientY) spawnRipple(event.clientX, event.clientY);
+    uploadFiles(files);
+  }
+
+  function bindDropTarget() {
+    document.addEventListener("dragenter", (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      dragDepth += 1;
+      if (dragDepth === 1) setDragActive(true);
+    });
+    document.addEventListener("dragover", (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      /* Fallback for dragleave not firing when the pointer leaves the window.
+         Browsers re-fire dragover about every 350ms while a drag is active,
+         so the window has to stay comfortably above that cadence. */
+      clearTimeout(dragResetTimer);
+      dragResetTimer = setTimeout(endDrag, 800);
+    });
+    document.addEventListener("dragleave", (event) => {
+      if (!hasFiles(event)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (!dragDepth) {
+        clearTimeout(dragResetTimer);
+        setDragActive(false);
+      }
+    });
+    document.addEventListener("drop", (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      endDrag();
+      handleDrop(event);
+    });
+    window.addEventListener("dragend", endDrag);
+    window.addEventListener("blur", endDrag);
   }
 
   async function chooseOutputDir() {
@@ -526,7 +769,9 @@
           <span class="result-kind">${escapeHtml(item.kind)}</span>
           <span class="result-name" title="${escapeHtml(item.path)}">${escapeHtml(item.name)}</span>
           <span class="result-size">${formatSize(item.size)}</span>
-          <button class="btn btn-secondary" type="button" data-open="${index}">打开</button>
+          <button class="btn btn-secondary" type="button" data-open="${index}">${
+            /\.pdf$/i.test(item.name) ? "阅读" : "打开"
+          }</button>
           <button class="btn btn-secondary" type="button" data-reveal="${index}">文件夹</button>
         </div>`
       )
@@ -534,6 +779,10 @@
     $$("[data-open]", el.resultList).forEach((button) => {
       button.addEventListener("click", () => {
         const item = results[Number(button.dataset.open)];
+        if (/\.pdf$/i.test(item.name)) {
+          location.href = `/viewer?from=app&path=${encodeURIComponent(item.path)}`;
+          return;
+        }
         api("/api/open", { method: "POST", body: { path: item.path } }).catch((error) =>
           toast(error.message, "bad")
         );
@@ -646,6 +895,57 @@
     renderGlossaryList();
   }
 
+  /* ------------------------------------------------------------ presets -- */
+  async function loadPresets() {
+    try {
+      const data = await api("/api/presets");
+      renderPresets(data.presets || []);
+    } catch (error) {
+      el.presetList.innerHTML = `<p class="hint">预设读取失败：${escapeHtml(error.message)}</p>`;
+    }
+  }
+
+  function renderPresets(items) {
+    if (!items.length) {
+      el.presetList.innerHTML = '<p class="hint">暂时没有可用的预设术语库。</p>';
+      return;
+    }
+    el.presetList.innerHTML = items
+      .map(
+        (item) => `
+        <div class="preset-item">
+          <div class="preset-main">
+            <strong>${escapeHtml(item.name)}</strong>
+            <span>${escapeHtml(item.description)}</span>
+          </div>
+          <span class="preset-count">${item.count} 条</span>
+          <button class="btn btn-secondary small" type="button" data-preset="${escapeHtml(item.id)}"
+                  ${item.installed ? "disabled" : ""}>${item.installed ? "已添加" : "添加"}</button>
+        </div>`
+      )
+      .join("");
+    $$("[data-preset]", el.presetList).forEach((button) => {
+      button.addEventListener("click", () => installPreset(button.dataset.preset));
+    });
+  }
+
+  async function installPreset(id) {
+    try {
+      const result = await api("/api/presets/install", { method: "POST", body: { id } });
+      state.glossaries = result.glossaries || state.glossaries;
+      renderGlossarySelect();
+      renderGlossaryList();
+      renderPresets(result.presets || []);
+      if (result.glossary) {
+        el.glossary.value = result.glossary.id;
+        scheduleSave();
+        toast(`已添加「${result.glossary.name}」${result.glossary.count} 条术语`, "good");
+      }
+    } catch (error) {
+      toast(error.message, "bad");
+    }
+  }
+
   function renderGlossaryList() {
     if (!state.glossaries.length) {
       el.glossaryList.innerHTML = '<p class="hint">还没有术语库，先在下面新建一个。</p>';
@@ -751,6 +1051,7 @@
   function openGlossaryModal() {
     el.glossaryModal.hidden = false;
     loadGlossaries().catch((error) => toast(error.message, "bad"));
+    loadPresets();
   }
 
   function closeGlossaryModal() {
@@ -764,44 +1065,22 @@
       event.stopPropagation();
       pickFiles();
     });
-    el.dropZone.addEventListener("click", () => el.fileInput.click());
-    el.dropZone.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        el.fileInput.click();
-      }
+    [el.heroDrop, el.dropZone].forEach((zone) => {
+      if (!zone) return;
+      zone.addEventListener("click", () => el.fileInput.click());
+      zone.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          el.fileInput.click();
+        }
+      });
     });
     el.fileInput.addEventListener("change", () => {
       uploadFiles(el.fileInput.files);
       el.fileInput.value = "";
     });
 
-    let dragDepth = 0;
-    el.dropZone.addEventListener("dragenter", (event) => {
-      event.preventDefault();
-      dragDepth += 1;
-      el.dropZone.classList.add("dragging");
-    });
-    el.dropZone.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "copy";
-    });
-    el.dropZone.addEventListener("dragleave", (event) => {
-      event.preventDefault();
-      dragDepth -= 1;
-      if (dragDepth <= 0) {
-        dragDepth = 0;
-        el.dropZone.classList.remove("dragging");
-      }
-    });
-    el.dropZone.addEventListener("drop", (event) => {
-      event.preventDefault();
-      dragDepth = 0;
-      el.dropZone.classList.remove("dragging");
-      if (event.dataTransfer && event.dataTransfer.files.length) {
-        uploadFiles(event.dataTransfer.files);
-      }
-    });
+    bindDropTarget();
 
     el.provider.addEventListener("change", switchProvider);
     el.model.addEventListener("change", scheduleSave);
@@ -903,13 +1182,13 @@
       refreshSummary();
       renderFiles();
 
-      if (location.hash === "#advanced") {
-        el.advanced.hidden = false;
-        el.btnAdvanced.setAttribute("aria-expanded", "true");
-      } else if (data.first_run) {
-        el.advanced.hidden = false;
-        el.btnAdvanced.setAttribute("aria-expanded", "true");
-        setTimeout(() => el.apiKey.focus(), 350);
+      /* First run settings are shown once a file exists (afterWorkReveal). */
+      state.firstRun = Boolean(data.first_run);
+      await restoreFiles();
+      if (state.stage === "entry") {
+        el.stageEntry.classList.add("stage-enter");
+        clearTimeout(entranceTimer);
+        entranceTimer = setTimeout(() => el.stageEntry.classList.remove("stage-enter"), ENTRANCE_MS);
       }
     } catch (error) {
       toast(`初始化失败：${error.message}`, "bad");
