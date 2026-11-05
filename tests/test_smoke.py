@@ -100,10 +100,29 @@ def test_output_renaming() -> None:
         results = runner.collect_results(
             out, before, [r"C:\in\paper.pdf", r"C:\in\other.pdf"], "zh"
         )
-        names = sorted(item["name"] for item in results)
-        expected = sorted(list(samples.values()) + ["paper_术语表.csv"])
-        assert names == expected, (names, expected)
-    print("PASS  output renaming")
+        # Every artefact of one paper lives in <output>/<paper>/.
+        expected = {
+            "paper_译文.pdf": out / "paper" / "paper_译文.pdf",
+            "paper_双语对照.pdf": out / "paper" / "paper_双语对照.pdf",
+            "paper_译文（无水印）.pdf": out / "paper" / "paper_译文（无水印）.pdf",
+            "paper_术语表.csv": out / "paper" / "paper_术语表.csv",
+            "other_双语对照.pdf": out / "other" / "other_双语对照.pdf",
+        }
+        got = {item["name"]: Path(item["path"]) for item in results}
+        assert got == expected, got
+        assert all(path.exists() for path in expected.values())
+        # Nothing is left loose in the output root.
+        assert sorted(path.name for path in out.iterdir()) == ["other", "paper"]
+
+        # Translating the same paper again reuses the folder instead of
+        # scattering a second copy into the root.
+        time.sleep(0.01)
+        before = runner._snapshot_dir(out)
+        (out / "paper.zh.mono.pdf").write_bytes(b"%PDF-1.4 fake")
+        again = runner.collect_results(out, before, [r"C:\in\paper.pdf"], "zh")
+        assert [item["name"] for item in again] == ["paper_译文 (2).pdf"], again
+        assert Path(again[0]["path"]).parent == out / "paper"
+    print("PASS  output renaming + per-paper folders")
 
 
 def test_page_specs() -> None:

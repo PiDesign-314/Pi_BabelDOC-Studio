@@ -102,13 +102,17 @@ def _allowed_file(raw: str, suffixes: tuple[str, ...]) -> Path | None:
 
 
 def _is_watched_folder(raw: str) -> bool:
+    """A watched folder itself, or one of its per-paper subfolders."""
     if not raw:
         return False
     try:
         folder = Path(str(raw)).expanduser().resolve()
     except OSError:
         return False
-    return folder in _allowed_roots()
+    for root in _allowed_roots():
+        if folder == root or folder.parent == root:
+            return True
+    return False
 
 
 def _resolve_exe(settings: dict) -> str | None:

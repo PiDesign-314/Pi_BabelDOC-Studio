@@ -51,6 +51,58 @@ def test_scan_groups_artifacts(output_dir):
     assert by_name["论文A"]["primary"].endswith("论文A_译文.pdf")
 
 
+def test_scan_reads_per_paper_folders(output_dir):
+    make(output_dir / "论文A" / "论文A_译文.pdf")
+    make(output_dir / "论文A" / "论文A_双语对照.pdf")
+    make(output_dir / "论文B" / "论文B_术语表.csv", b"a,b\n")
+
+    items = {item["name"]: item for item in library.scan()}
+
+    assert set(items) == {"论文A", "论文B"}
+    assert items["论文A"]["dir"] == str((output_dir / "论文A").resolve())
+    assert [file["kind"] for file in items["论文A"]["files"]] == ["译文", "双语对照"]
+    assert items["论文B"]["files"][0]["kind"] == "术语表"
+    assert items["论文A"]["primary"].endswith("论文A_译文.pdf")
+
+
+def test_rename_renames_the_paper_folder(output_dir, annotation_dir, library_file):
+    source = make(output_dir / "旧名" / "旧名_译文.pdf")
+    make(output_dir / "旧名" / "旧名_双语对照.pdf")
+    annotations.save(str(source), [{"type": "note", "page": 1, "comment": "hi"}])
+
+    result = library.rename(str(source.parent), "旧名", "新名")
+
+    assert result["dir"] == str((output_dir / "新名").resolve())
+    assert (output_dir / "新名" / "新名_译文.pdf").exists()
+    assert not (output_dir / "旧名").exists()
+    # annotations follow the file into the renamed folder
+    assert annotations.count(str(output_dir / "新名" / "新名_译文.pdf")) == 1
+    assert annotations.count(str(source)) == 0
+    assert [item["name"] for item in library.scan()] == ["新名"]
+
+
+def test_delete_removes_the_empty_paper_folder(output_dir, library_file):
+    make(output_dir / "论文A" / "论文A_译文.pdf")
+
+    library.delete(str(output_dir / "论文A"), "论文A")
+
+    assert not (output_dir / "论文A").exists()
+    assert library.scan() == []
+
+
+def test_flat_and_folder_results_coexist(output_dir, library_file):
+    make(output_dir / "论文A_译文.pdf")  # result of an older version
+    make(output_dir / "论文A" / "论文A_译文.pdf")
+
+    items = library.scan()
+
+    assert len(items) == 2
+    assert {item["dir"] for item in items} == {
+        str(output_dir.resolve()),
+        str((output_dir / "论文A").resolve()),
+    }
+
+
 def test_rename_moves_every_artifact(output_dir, annotation_dir):
     make(output_dir / "旧名_译文.pdf")
     make(output_dir / "旧名_双语对照.pdf")
@@ -174,6 +226,19 @@ def test_allowed_file_only_inside_watched_folders(tmp_path, monkeypatch):
     assert studio._allowed_file(str(outside), (".pdf",)) is None
     assert studio._allowed_file(str(inside), (".csv",)) is None
     assert studio._allowed_file("", (".pdf",)) is None
+
+
+def test_watched_folder_accepts_a_paper_subfolder(tmp_path, monkeypatch):
+    import app as studio
+
+    monkeypatch.setattr(studio, "_allowed_roots", lambda: [tmp_path.resolve()])
+    paper = tmp_path / "论文A"
+    paper.mkdir()
+
+    assert studio._is_watched_folder(str(paper)) is True
+    assert studio._is_watched_folder(str(paper / "deeper")) is False
+    assert studio._is_watched_folder(str(tmp_path)) is True
+    assert studio._is_watched_folder("") is False
 
 
 def test_annotations_api_roundtrip(tmp_path, monkeypatch, annotation_dir):

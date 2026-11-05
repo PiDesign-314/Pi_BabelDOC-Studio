@@ -502,7 +502,26 @@ def _unique_path(path: Path) -> Path:
         index += 1
 
 
-def _pretty_target(filename: str, source_stems: dict[str, str], lang_out: str) -> tuple[str, str] | None:
+_BAD_FOLDER_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def paper_folder(stem: str) -> str:
+    """The per-paper folder name used inside the output directory.
+
+    One paper can produce several files (译文 / 双语对照 / 术语表), so they are
+    kept together in a folder named after the source document instead of being
+    scattered across the output directory.
+    """
+    name = _BAD_FOLDER_CHARS.sub("_", str(stem or "").strip()).strip(" .")
+    if len(name) > 80:
+        name = name[:80].rstrip(" .")
+    return name or "未命名文稿"
+
+
+def _pretty_target(
+    filename: str, source_stems: dict[str, str], lang_out: str
+) -> tuple[str, str, str] | None:
+    """Map BabelDOC's artefact name to (friendly name, kind, paper stem)."""
     lowered = filename.lower()
     if not lowered.endswith(".pdf"):
         return None
@@ -526,10 +545,11 @@ def _pretty_target(filename: str, source_stems: dict[str, str], lang_out: str) -
     stem_name = known or base
     label = "译文" if kind == "mono" else "双语对照"
     suffix = "（无水印）" if no_watermark else ""
-    return f"{stem_name}_{label}{suffix}.pdf", label
+    return f"{stem_name}_{label}{suffix}.pdf", label, stem_name
 
 
-def _glossary_target(filename: str, lang_out: str) -> str | None:
+def _glossary_target(filename: str, lang_out: str) -> tuple[str, str] | None:
+    """(friendly name, paper stem) for BabelDOC's auto-extracted glossary."""
     suffix = ".glossary.csv"
     if not filename.lower().endswith(suffix):
         return None
@@ -540,7 +560,25 @@ def _glossary_target(filename: str, lang_out: str) -> str | None:
         stem = stem[: -len(".no_watermark")]
     if not stem:
         return None
-    return f"{stem}_术语表.csv"
+    return f"{stem}_术语表.csv", stem
+
+
+def _move_into_paper(output_dir: Path, stem: str, name: str, path: Path) -> Path:
+    """Move one artefact into ``<output>/<paper>/`` and return its new path.
+
+    Folders are reused for the same paper, so translating a document again
+    keeps its files together; the file itself gets a ``(2)`` suffix instead of
+    overwriting the earlier result.
+    """
+    try:
+        folder = output_dir / paper_folder(stem)
+        folder.mkdir(parents=True, exist_ok=True)
+        target = _unique_path(folder / name)
+        if target != path:
+            path.replace(target)
+        return target
+    except OSError:
+        return path
 
 
 def collect_results(
@@ -574,14 +612,10 @@ def collect_results(
 
         lowered = path.name.lower()
         if lowered.endswith(".glossary.csv"):
-            glossary_name = _glossary_target(path.name, lang_out)
-            if glossary_name:
-                try:
-                    target = _unique_path(output_dir / glossary_name)
-                    path.replace(target)
-                    path = target
-                except OSError:
-                    pass
+            glossary = _glossary_target(path.name, lang_out)
+            if glossary:
+                glossary_name, glossary_stem = glossary
+                path = _move_into_paper(output_dir, glossary_stem, glossary_name, path)
             results.append(
                 {"name": path.name, "path": str(path), "kind": "术语表", "size": path.stat().st_size}
             )
@@ -590,23 +624,16 @@ def collect_results(
         mapping = _pretty_target(path.name, source_stems, lang_out)
         if not mapping:
             continue
-        new_name, kind = mapping
-        target = _unique_path(output_dir / new_name)
-        try:
-            if target != path:
-                path.replace(target)
-            results.append(
-                {
-                    "name": target.name,
-                    "path": str(target),
-                    "kind": kind,
-                    "size": target.stat().st_size,
-                }
-            )
-        except OSError:
-            results.append(
-                {"name": path.name, "path": str(path), "kind": kind, "size": path.stat().st_size}
-            )
+        new_name, kind, paper_stem = mapping
+        target = _move_into_paper(output_dir, paper_stem, new_name, path)
+        results.append(
+            {
+                "name": target.name,
+                "path": str(target),
+                "kind": kind,
+                "size": target.stat().st_size,
+            }
+        )
     return results
 
 

@@ -315,6 +315,18 @@ body.reader {
    would be composited on its own and could not multiply into the page text. */
 .r-anno { position: absolute; inset: 0; pointer-events: none; }
 
+/* Counterpart of a selection on the other half of a side-by-side dual page. */
+.r-ghost { position: absolute; inset: 0; pointer-events: none; }
+.r-ghost .r-sync {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(10, 132, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.24);
+  mix-blend-mode: multiply;
+  animation: r-sync-in 0.18s ease;
+}
+@keyframes r-sync-in { from { opacity: 0; } }
+
 .r-mark {
   position: absolute;
   border-radius: 1.5px;

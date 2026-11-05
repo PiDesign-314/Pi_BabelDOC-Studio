@@ -4,8 +4,9 @@ A document produced by BabelDOC shows up as a set of siblings:
 
    论文_译文.pdf     论文_双语对照.pdf     论文_术语表.csv
 
-They are grouped by their shared base name inside each watched folder, which
-gives the UI one card per translated paper.
+They are grouped by their shared base name and their folder, which gives the UI
+one card per translated paper.  Newer results live in a per-paper folder
+(``论文/论文_译文.pdf``) while older flat results are still picked up.
 """
 
 from __future__ import annotations
@@ -247,7 +248,19 @@ def page_count(path: str | Path) -> int | None:
     return pages
 
 
+def _parse_artifact(path: Path) -> tuple[str, str, Path] | None:
+    match = _ARTIFACT_RE.match(path.name)
+    if match:
+        label = match.group("kind") + (match.group("wm") or "")
+        return match.group("base"), label, path
+    glossary = _GLOSSARY_RE.match(path.name)
+    if glossary:
+        return glossary.group("base"), "术语表", path
+    return None
+
+
 def _iter_artifacts(folder: Path):
+    """Artefacts sitting directly inside ``folder`` (no recursion)."""
     try:
         entries = sorted(folder.iterdir())
     except OSError:
@@ -255,14 +268,21 @@ def _iter_artifacts(folder: Path):
     for path in entries:
         if not path.is_file():
             continue
-        match = _ARTIFACT_RE.match(path.name)
-        if match:
-            label = match.group("kind") + (match.group("wm") or "")
-            yield match.group("base"), label, path
-            continue
-        glossary = _GLOSSARY_RE.match(path.name)
-        if glossary:
-            yield glossary.group("base"), "术语表", path
+        parsed = _parse_artifact(path)
+        if parsed:
+            yield parsed
+
+
+def _scan_artifacts(folder: Path):
+    """Artefacts in the watched folder plus each per-paper subfolder."""
+    yield from _iter_artifacts(folder)
+    try:
+        entries = sorted(folder.iterdir())
+    except OSError:
+        return
+    for path in entries:
+        if path.is_dir():
+            yield from _iter_artifacts(path)
 
 
 def _item_id(folder: str, base: str) -> str:
@@ -280,18 +300,18 @@ def scan() -> list[dict]:
         folder = Path(raw)
         if not folder.is_dir():
             continue
-        try:
-            folder_key = str(folder.resolve())
-        except OSError:
-            folder_key = raw
-        for base, kind, path in _iter_artifacts(folder):
-            key = (folder_key, base)
+        for base, kind, path in _scan_artifacts(folder):
+            try:
+                parent = str(path.parent.resolve())
+            except OSError:
+                parent = str(path.parent)
+            key = (parent, base)
             item = items.get(key)
             if item is None:
                 item = {
-                    "id": _item_id(folder_key, base),
+                    "id": _item_id(parent, base),
                     "name": base,
-                    "dir": folder_key,
+                    "dir": parent,
                     "files": [],
                     "annotations": 0,
                 }
@@ -339,6 +359,27 @@ def _artifacts_for(folder: Path, base: str) -> list[tuple[str, str, Path]]:
     return [entry for entry in _iter_artifacts(folder) if entry[0] == base]
 
 
+def _folder_key(folder: Path) -> str:
+    try:
+        return str(folder.resolve())
+    except OSError:
+        return str(folder)
+
+
+def _is_watched_root(folder: Path) -> bool:
+    """True for a folder the user watches itself (not one of our paper folders)."""
+    key = _folder_key(folder).lower()
+    for raw in watched_dirs():
+        if str(Path(raw)).lower() == key:
+            return True
+        try:
+            if _folder_key(Path(raw)).lower() == key:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _check_name(name: str) -> str:
     value = (name or "").strip()
     if not value:
@@ -368,8 +409,25 @@ def rename(folder: str | Path, base: str, new_base: str) -> dict:
             raise FileExistsError(destination.name)
         plans.append((path, destination))
 
+    # Annotation files are keyed by the full path, so remember where each file
+    # was before the folder (and the files) are moved.
+    origins = {source.name: source for source, _destination in plans}
+
+    # A paper produced by this app lives in its own folder, so renaming the
+    # paper should rename that folder too — everything about it stays together.
+    old_dir = target_dir
+    move_folder = target_dir.name == base and not _is_watched_root(target_dir)
+    if move_folder:
+        destination_dir = target_dir.with_name(new_name)
+        if destination_dir.exists():
+            raise FileExistsError(destination_dir.name)
+
     done: list[tuple[Path, Path]] = []
     try:
+        if move_folder:
+            old_dir.rename(target_dir.with_name(new_name))
+            target_dir = old_dir.with_name(new_name)
+            plans = [(target_dir / source.name, target_dir / destination.name) for source, destination in plans]
         for source, destination in plans:
             source.rename(destination)
             done.append((source, destination))
@@ -379,16 +437,20 @@ def rename(folder: str | Path, base: str, new_base: str) -> dict:
                 destination.rename(source)
             except OSError:
                 pass
+        if move_folder and target_dir != old_dir and target_dir.exists():
+            try:
+                target_dir.rename(old_dir)
+            except OSError:
+                pass
         raise
 
     for source, destination in plans:
-        if source.suffix.lower() == ".pdf":
-            annotations.migrate(source, destination)
-    try:
-        folder_key = str(target_dir.resolve())
-    except OSError:
-        folder_key = str(target_dir)
-    _remap_collection_ids(_item_id(folder_key, base), _item_id(folder_key, new_name))
+        if destination.suffix.lower() == ".pdf":
+            annotations.migrate(origins.get(source.name, source), destination)
+    _remap_collection_ids(
+        _item_id(_folder_key(old_dir), base),
+        _item_id(_folder_key(target_dir), new_name),
+    )
     return {"base": base, "dir": str(target_dir), "name": new_name, "renamed": len(plans)}
 
 
@@ -436,17 +498,20 @@ def delete(folder: str | Path, base: str) -> dict:
     artefacts = _artifacts_for(target_dir, base)
     if not artefacts:
         raise FileNotFoundError("没有找到这个文件的产物")
+    key = _folder_key(target_dir)
     removed = 0
     for _old_base, _kind, path in artefacts:
         _recycle(path)
         if path.suffix.lower() == ".pdf":
             annotations.forget(path)
         removed += 1
-    try:
-        folder_key = str(target_dir.resolve())
-    except OSError:
-        folder_key = str(target_dir)
-    _drop_collection_items(_item_id(folder_key, base))
+    # Our own per-paper folder becomes empty: take it away as well.
+    if target_dir.name == base and not _is_watched_root(target_dir):
+        try:
+            target_dir.rmdir()
+        except OSError:
+            pass
+    _drop_collection_items(_item_id(key, base))
     return {"base": base, "dir": str(target_dir), "removed": removed}
 
 

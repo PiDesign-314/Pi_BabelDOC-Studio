@@ -230,9 +230,11 @@
       const canvas = document.createElement("canvas");
       const text = document.createElement("div");
       text.className = "r-text";
+      const ghost = document.createElement("div");
+      ghost.className = "r-ghost";
       const anno = document.createElement("div");
       anno.className = "r-anno";
-      box.append(canvas, text, anno);
+      box.append(canvas, text, ghost, anno);
       section.append(box);
       fragment.append(section);
 
@@ -242,6 +244,7 @@
         box,
         canvas,
         text,
+        ghost,
         anno,
         top: 0,
         painted: false,
@@ -540,8 +543,350 @@
     }
     sheet.nodes = null;
     sheet.textCache = null;
+    try {
+      analyseLayout(sheet, content.items, viewport);
+    } catch {
+      sheet.dual = false;
+    }
     sheet.textReady = true;
   }
+
+  /* ------------------------------------------------------ bilingual sync -- */
+  /* A side-by-side dual page carries the original on the left and the
+     translation on the right, with no machine-readable link between them.
+     BabelDOC keeps the layout, so paragraphs sit at roughly the same height on
+     both sides: selecting text on one side can therefore point at the
+     paragraph occupying the same vertical band on the other side. */
+  function analyseLayout(sheet, items, viewport) {
+    const scale = viewport.scale || 1;
+    const rows = [];
+    for (const item of items) {
+      if (!item.str || !item.str.trim()) continue;
+      const tx = window.pdfjsLib.Util.transform(viewport.transform, item.transform);
+      const size = Math.hypot(tx[2], tx[3]) / scale;
+      const width = item.width || 0;
+      if (!(size > 0) || !(width > 0)) continue;
+      rows.push({
+        x: tx[4] / scale,
+        right: tx[4] / scale + width,
+        baseline: tx[5] / scale,
+        size,
+      });
+    }
+    if (!rows.length) {
+      sheet.dual = false;
+      sheet.blocks = null;
+      return;
+    }
+    /* Lines are per column: text at the same baseline but far apart (the two
+       halves of a dual page) becomes two separate line boxes. */
+    rows.sort((a, b) => a.baseline - b.baseline || a.x - b.x);
+
+    const lines = [];
+    for (const row of rows) {
+      const last = lines[lines.length - 1];
+      const sameBaseline =
+        last &&
+        Math.abs(last.baseline - row.baseline) <= Math.max(1.2, Math.min(last.size, row.size) * 0.5);
+      const near =
+        last && row.x - last.right <= Math.max(last.size * 2.4, 12) && last.x - row.right <= Math.max(last.size * 2.4, 12);
+      if (sameBaseline && near) {
+        last.x = Math.min(last.x, row.x);
+        last.right = Math.max(last.right, row.right);
+        last.size = Math.max(last.size, row.size);
+        continue;
+      }
+      lines.push({
+        x: row.x,
+        right: row.right,
+        baseline: row.baseline,
+        size: row.size,
+      });
+    }
+
+    const width = (viewport.width || 0) / scale;
+    const height = (viewport.height || 0) / scale;
+    const boxes = lines.map((line) => ({
+      x: line.x,
+      right: line.right,
+      top: line.baseline - line.size * 0.92,
+      bottom: line.baseline + line.size * 0.28,
+    }));
+    sheet.pageWidth = width;
+
+    /* Two columns of text with a clean gutter in the middle: that is what a
+       "原文 | 译文" page looks like. */
+    const mid = width / 2;
+    const crossing = boxes.filter((box) => box.x < mid - 1 && box.right > mid + 1).length;
+    const left = boxes.filter((box) => box.right <= mid + 2).length;
+    const right = boxes.filter((box) => box.x >= mid - 2).length;
+    sheet.layout = { crossing, left, right, total: boxes.length };
+    sheet.dual =
+      width / Math.max(height, 1) > 1.05 &&
+      crossing === 0 &&
+      left >= 3 &&
+      right >= 3 &&
+      left + right >= boxes.length * 0.9;
+    if (!sheet.dual) {
+      sheet.lines = null;
+      sheet.blocks = null;
+      return;
+    }
+
+    sheet.lines = boxes.map((box) => ({
+      x: box.x,
+      right: box.right,
+      top: box.top,
+      bottom: box.bottom,
+      side: (box.x + box.right) / 2 < mid ? "L" : "R",
+    }));
+    const half = width / 2;
+    sheet.blocks = [
+      ...buildBlocks(sheet.lines.filter((line) => line.side === "L"), "L", 0, half),
+      ...buildBlocks(sheet.lines.filter((line) => line.side === "R"), "R", half, half),
+    ];
+  }
+
+  /* Paragraph blocks: lines stacked with normal line spacing inside one
+     column.  Lines are attached to the block they overlap horizontally, so
+     two columns of the same paragraph (or a three-author header grid) never
+     merge into one block. */
+  function buildBlocks(lines, side, halfStart, halfWidth) {
+    if (!lines.length) return [];
+    const sorted = lines.slice().sort((a, b) => a.top - b.top || a.x - b.x);
+    const blocks = [];
+    for (const line of sorted) {
+      const height = Math.max(1, line.bottom - line.top);
+      let best = null;
+      let bestOverlap = 0;
+      for (let index = blocks.length - 1; index >= 0 && index >= blocks.length - 40; index -= 1) {
+        const block = blocks[index];
+        if (line.top - block.bottom > Math.max(3, height * 0.8)) continue;
+        const shared = Math.min(block.right, line.right) - Math.max(block.left, line.x);
+        const narrow = Math.min(block.right - block.left, line.right - line.x);
+        if (shared < Math.max(2, narrow * 0.3)) continue;
+        /* A full-width caption must not swallow the narrower column below it. */
+        const widest = Math.max(block.right - block.left, line.right - line.x);
+        if (widest > narrow * 1.8) continue;
+        if (shared > bestOverlap) {
+          bestOverlap = shared;
+          best = block;
+        }
+      }
+      if (best) {
+        best.left = Math.min(best.left, line.x);
+        best.right = Math.max(best.right, line.right);
+        best.bottom = Math.max(best.bottom, line.bottom);
+        best.lines.push(line);
+      } else {
+        blocks.push({
+          side,
+          top: line.top,
+          bottom: line.bottom,
+          left: line.x,
+          right: line.right,
+          lines: [line],
+        });
+      }
+    }
+    /* Where the block sits inside its half (0…1): the translation keeps the
+       original layout, so matching blocks sit at the same horizontal spot. */
+    for (const block of blocks) {
+      block.fx = ((block.left + block.right) / 2 - halfStart) / Math.max(1, halfWidth);
+    }
+    return blocks;
+  }
+
+  /* The block of the other half that belongs to ``source``: it sits at the
+     same horizontal position and at the same height, ideally overlapping it. */
+  function counterpartBlock(blocks, side, source) {
+    const centre = (source.top + source.bottom) / 2;
+    let best = null;
+    let bestScore = -Infinity;
+    for (const block of blocks) {
+      if (block.side !== side) continue;
+      const overlap = Math.min(block.bottom, source.bottom) - Math.max(block.top, source.top);
+      const distance = Math.abs((block.top + block.bottom) / 2 - centre);
+      const column = Math.abs((block.fx || 0.5) - (source.fx || 0.5));
+      const score =
+        (overlap > 0 ? 1000 + Math.min(overlap, 200) : 0) -
+        distance +
+        Math.max(0, 160 - column * 480);
+      if (score > bestScore) {
+        bestScore = score;
+        best = block;
+      }
+    }
+    return best;
+  }
+
+  /* Counterpart of the selection on the other half of a side-by-side page:
+     find the paragraph holding the selection, then the paragraph on the other
+     half, and finally the lines at the same relative position inside it. */
+  function counterpartBands(sheet, rects) {
+    if (!sheet.dual || !sheet.lines || !rects.length) return [];
+    const mid = (sheet.pageWidth || 0) / 2;
+    const first = rects[0];
+    const side = first.x + first.w / 2 < mid ? "L" : "R";
+    const other = side === "L" ? "R" : "L";
+    const top = Math.min(...rects.map((rect) => rect.y));
+    const bottom = Math.max(...rects.map((rect) => rect.y + rect.h));
+    const left = Math.min(...rects.map((rect) => rect.x));
+    const right = Math.max(...rects.map((rect) => rect.x + rect.w));
+
+    const chosen = new Set();
+    for (const block of sheet.blocks || []) {
+      if (block.side !== side) continue;
+      if (block.bottom <= top || block.top >= bottom) continue;
+      if (block.right <= left || block.left >= right) continue;
+      const span = Math.max(1, block.bottom - block.top);
+      const from = Math.min(1, Math.max(0, (top - block.top) / span));
+      const to = Math.min(1, Math.max(0, (bottom - block.top) / span));
+      const match = counterpartBlock(sheet.blocks, other, block);
+      if (!match) continue;
+      const target = Math.max(1, match.bottom - match.top);
+      const start = match.top + from * target;
+      const end = match.top + Math.max(to, from) * target;
+      const pad = Math.max(1.5, Math.min(4, (end - start) * 0.3));
+      let picked = match.lines.filter((line) => {
+        const centre = (line.top + line.bottom) / 2;
+        return centre >= start - pad && centre <= end + pad;
+      });
+      if (!picked.length) {
+        let nearest = null;
+        for (const line of match.lines) {
+          const distance = Math.abs((line.top + line.bottom) / 2 - (start + end) / 2);
+          if (!nearest || distance < nearest.distance) nearest = { line, distance };
+        }
+        if (nearest) picked = [nearest.line];
+      }
+      for (const line of picked) chosen.add(line);
+    }
+
+    let bands = [...chosen];
+    if (!bands.length) {
+      /* No paragraph matched: fall back to the same vertical band. */
+      const lineHeight = (bottom - top) / Math.max(1, rects.length);
+      const pad = Math.max(2, lineHeight * 0.45);
+      bands = sheet.lines.filter((line) => {
+        if (line.side !== other) return false;
+        const centre = (line.top + line.bottom) / 2;
+        return centre >= top - pad && centre <= bottom + pad;
+      });
+    }
+    return bands.sort((a, b) => a.top - b.top || a.x - b.x);
+  }
+
+  function renderSync(byPage) {
+    clearSync();
+    for (const [page, rects] of byPage) {
+      const sheet = state.sheets[page - 1];
+      if (!sheet || !sheet.dual) continue;
+      const bands = counterpartBands(sheet, rects);
+      const scale = state.scale;
+      for (const band of bands) {
+        const mark = document.createElement("div");
+        mark.className = "r-sync";
+        mark.style.left = `${band.x * scale}px`;
+        mark.style.top = `${band.top * scale}px`;
+        mark.style.width = `${(band.right - band.x) * scale}px`;
+        mark.style.height = `${(band.bottom - band.top) * scale}px`;
+        sheet.ghost.appendChild(mark);
+      }
+    }
+  }
+
+  function showSync(captured) {
+    if (!captured || !captured.rects || !captured.rects.length) {
+      clearSync();
+      return;
+    }
+    const byPage = new Map();
+    for (const rect of captured.rects) {
+      const page = rect.page || captured.parts[0].page;
+      const bucket = byPage.get(page);
+      if (bucket) bucket.push(rect);
+      else byPage.set(page, [rect]);
+    }
+    renderSync(byPage);
+  }
+
+  /* While the pointer is still dragging the selection has no text spans yet,
+     so the counterpart is recomputed from the live client rects: the same
+     geometry captureSelection() stores, without walking the text nodes. */
+  function syncSelectionLive() {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) {
+      clearSync();
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    const byPage = new Map();
+    for (const sheet of state.sheets) {
+      if (!sheet.dual || !sheet.textReady) continue;
+      let touches = false;
+      try {
+        touches = range.intersectsNode(sheet.text);
+      } catch {
+        touches = false;
+      }
+      if (!touches) continue;
+      const box = sheet.box.getBoundingClientRect();
+      const rects = [];
+      for (const rect of range.getClientRects()) {
+        if (rect.width < 0.5 || rect.height < 0.5) continue;
+        rects.push({
+          x: (rect.left - box.left) / state.scale,
+          y: (rect.top - box.top) / state.scale,
+          w: rect.width / state.scale,
+          h: rect.height / state.scale,
+        });
+      }
+      if (rects.length) byPage.set(sheet.no, legacyBands(rects));
+    }
+    renderSync(byPage);
+  }
+
+  let syncFrame = 0;
+
+  function scheduleLiveSync() {
+    if (syncFrame) return;
+    syncFrame = window.requestAnimationFrame(() => {
+      syncFrame = 0;
+      syncSelectionLive();
+    });
+  }
+
+  function clearSync() {
+    for (const sheet of state.sheets) {
+      if (sheet.ghost && sheet.ghost.childElementCount) sheet.ghost.innerHTML = "";
+    }
+  }
+
+  window.__readerDebug = () => ({
+    scale: state.scale,
+    sheets: state.sheets.slice(0, 4).map((sheet) => ({
+      no: sheet.no,
+      dual: sheet.dual,
+      layout: sheet.layout || null,
+      pageWidth: sheet.pageWidth,
+      lines: sheet.lines ? sheet.lines.length : 0,
+      blocks: sheet.blocks
+        ? sheet.blocks.map((block) => ({
+            side: block.side,
+            fx: Math.round((block.fx || 0) * 100) / 100,
+            top: Math.round(block.top),
+            bottom: Math.round(block.bottom),
+            lines: block.lines.length,
+          }))
+        : 0,
+      ghost: sheet.ghost ? sheet.ghost.childElementCount : -1,
+      textReady: sheet.textReady,
+    })),
+    pending: state.pending
+      ? { rects: state.pending.rects.length, pages: state.pending.parts.map((p) => p.page) }
+      : null,
+  });
 
   function release(sheet) {
     if (!sheet.painted && !sheet.textReady) return false;
@@ -556,7 +901,11 @@
     sheet.canvas.width = 0;
     sheet.canvas.height = 0;
     sheet.text.innerHTML = "";
+    sheet.ghost.innerHTML = "";
     sheet.anno.innerHTML = "";
+    sheet.lines = null;
+    sheet.blocks = null;
+    sheet.dual = false;
     sheet.nodes = null;
     sheet.textCache = null;
     sheet.textArgs = null;
@@ -585,6 +934,7 @@
   }
 
   function relayout(anchor) {
+    clearSync();
     resetSheets();
     computeScale();
     sizeSheets();
@@ -1436,6 +1786,7 @@
     if (el.selToolbar.hidden) return;
     el.selToolbar.hidden = true;
     state.pending = null;
+    clearSync();
   }
 
   function onMouseUp(event) {
@@ -1447,10 +1798,12 @@
       const captured = captureSelection();
       if (!captured) {
         hideSelectionToolbar();
+        clearSync();
         return;
       }
       state.pending = captured;
       showSelectionToolbar(captured.anchor);
+      showSync(captured);
     }, 0);
   }
 
@@ -1868,6 +2221,11 @@
       closeMenu();
     });
 
+    document.addEventListener("mousedown", (event) => {
+      if (event.target instanceof Element && event.target.closest(".r-sel")) return;
+      clearSync();
+    });
+
     el.sidebarBtn.addEventListener("click", () => {
       const hidden = el.sidebar.hidden;
       el.sidebar.hidden = !hidden;
@@ -1912,6 +2270,8 @@
     });
 
     document.addEventListener("mouseup", onMouseUp);
+    /* Live counterpart while the pointer is still dragging out a selection. */
+    document.addEventListener("selectionchange", scheduleLiveSync);
 
 
     el.selToolbar.addEventListener("mousedown", (event) => event.preventDefault());
