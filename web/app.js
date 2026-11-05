@@ -75,7 +75,6 @@
     jobNote: $("#job-note"),
     stage: $("#stage"),
     percent: $("#percent"),
-    barFill: $("#bar-fill"),
     btnLog: $("#btn-log"),
     log: $("#log"),
     summary: $("#summary"),
@@ -713,8 +712,6 @@
     const progress = Number(job.progress) || 0;
     el.stage.textContent = job.stage || "运行中";
     el.percent.textContent = `${Math.round(progress)}%`;
-    el.barFill.classList.toggle("indeterminate", progress <= 0 && job.status === "running");
-    el.barFill.style.width = progress > 0 ? `${Math.min(progress, 100)}%` : "";
     el.jobCard.dataset.state =
       job.status === "succeeded"
         ? "done"
@@ -885,8 +882,6 @@
       el.usageLine.hidden = true;
       el.resultCard.hidden = true;
       el.jobCard.dataset.state = "running";
-      el.barFill.style.width = "0%";
-      el.barFill.classList.add("indeterminate");
       el.progressBlock.hidden = false;
       setRunning(true);
       poll();
@@ -916,12 +911,10 @@
     clearTimeout(state.timer);
     state.timer = null;
     setRunning(false);
-    el.barFill.classList.remove("indeterminate");
     renderUsage(job);
     renderJobCard(job);
     if (job.status === "succeeded") {
       el.jobCard.dataset.state = "done";
-      el.barFill.style.width = "100%";
       el.percent.textContent = "100%";
       el.stage.textContent = "翻译完成";
       toast("翻译完成", "good");
