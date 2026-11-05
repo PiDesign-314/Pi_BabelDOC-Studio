@@ -179,7 +179,10 @@ body.reader {
 }
 .r-thumb canvas {
   display: block;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
   border-radius: 5px;
   background: #fff;
   box-shadow: 0 1px 4px rgba(17, 17, 26, 0.14);
@@ -999,8 +1002,12 @@ body[data-paper=ink] .r-stage { background: #cfcfc8; }
 .r-ink path { pointer-events: stroke; cursor: pointer; }
 .r-pages.drawing .r-text { pointer-events: none; }
 .r-pages.drawing { touch-action: none; user-select: none; cursor: crosshair; }
-.r-dot[data-hint] { position: relative; }
-.r-dot[data-hint]:hover:after, .r-dot[data-hint]:focus-visible:after {
+.r-dot[data-hint],
+.r-filter-chip[data-hint] { position: relative; }
+.r-dot[data-hint]:hover:after,
+.r-dot[data-hint]:focus-visible:after,
+.r-filter-chip[data-hint]:hover:after,
+.r-filter-chip[data-hint]:focus-visible:after {
   content: attr(data-hint);
   position: absolute;
   bottom: 30px;

@@ -50,6 +50,32 @@
     teal: "青色",
     red: "红色",
   };
+  const DEFAULT_COLOR_LABELS = {
+    yellow: "疑问",
+    green: "结论",
+    red: "重点",
+    blue: "证据",
+    pink: "灵感",
+    orange: "待办",
+    purple: "定义",
+    teal: "方法",
+  };
+
+  /* Every colour affordance in the reader (toolbar, editor, right-click menu,
+     sidebar filter) must describe the same colour tag when hints are on. */
+  function colorHint(color) {
+    const base = COLOR_LABEL[color] || color;
+    const box = document.getElementById("color-hints");
+    const on = !box || box.checked;
+    const labels = { ...DEFAULT_COLOR_LABELS, ...(readerPrefs.labels || {}) };
+    const semantic = labels[color];
+    return on && semantic ? `${base} · ${semantic}` : base;
+  }
+  function colorHintLabel(color) {
+    const labels = { ...DEFAULT_COLOR_LABELS, ...(readerPrefs.labels || {}) };
+    const box = document.getElementById("color-hints");
+    return box && box.checked ? labels[color] || "" : "";
+  }
 
   const el = {
     back: $("#back-link"),
@@ -1192,7 +1218,8 @@
       const piece = document.createRange();
       piece.setStart(node, from);
       piece.setEnd(node, to);
-      rects.push(...piece.getClientRects());
+      const em = parseFloat(getComputedStyle(node.parentElement).fontSize) || 0;
+      for (const rect of piece.getClientRects()) rects.push({ rect, em });
     }
     if (start === null || end === null || end <= start) return null;
     return { start, end, rects };
@@ -1334,7 +1361,7 @@
     }
     /* A hair of vertical padding keeps ascenders and descenders inside the
        band without letting two lines touch. */
-    return lines.map((line) => {
+    const bands = lines.map((line) => {
       const pad = Math.min(0.6, line.h * 0.08);
       return {
         x: line.left,
@@ -1343,6 +1370,20 @@
         h: line.h + pad * 2,
       };
     });
+    /* Line boxes from adjacent lines can overlap by a pixel or two; trim the
+       lower band instead of letting the two multiply into a darker stripe. */
+    bands.sort((a, b) => a.y - b.y);
+    for (let index = 1; index < bands.length; index += 1) {
+      const previous = bands[index - 1];
+      const band = bands[index];
+      const below = previous.y + previous.h + 0.2;
+      if (band.y < below) {
+        const overlap = below - band.y;
+        band.y += overlap;
+        band.h = Math.max(2, band.h - overlap);
+      }
+    }
+    return bands;
   }
 
   function legacyBands(rects) {
@@ -1385,6 +1426,7 @@
      rectangles into one band per text line, and that never changes until the
      annotation itself is replaced. */
   const BANDS = new WeakMap();
+  const LIVE_BANDS = new WeakMap();
   const NOTE_GLYPH =
     '<svg viewBox="0 0 14 14" fill="none" aria-hidden="true">' +
     '<path d="M3.7 4.5h6.6M3.7 7h6.6M3.7 9.5h4" stroke="currentColor" ' +
@@ -1403,6 +1445,30 @@
      rectangle with its page; older ones fall back to character ranges (which
      need the live text layer) only when the highlight actually spans pages. */
   function bandsFor(item, sheet) {
+    /* The live text layer knows the exact glyph boxes; prefer it over stored
+       rectangles so old highlights (which may carry taller line boxes) render
+       as clean, non-overlapping bands too. */
+    if (item.ranges && item.ranges.length && sheet.textReady) {
+      const cached = LIVE_BANDS.get(item);
+      if (
+        cached &&
+        cached.page === sheet.no &&
+        cached.scale === state.scale &&
+        cached.updated === item.updated
+      ) {
+        return cached.bands;
+      }
+      const live = bandsFromRects(annotationRects(sheet, item), sheet);
+      if (live.length) {
+        LIVE_BANDS.set(item, {
+          page: sheet.no,
+          scale: state.scale,
+          updated: item.updated,
+          bands: live,
+        });
+        return live;
+      }
+    }
     const rects = item.rects || [];
     if (rects.length) {
       if (rects[0].page != null) {
@@ -1656,7 +1722,11 @@
   }
 
   function renderNotesList() {
-    const all = [...state.items].sort((a, b) => a.page - b.page || a.created - b.created);
+    /* Page text is content on the page, not a review note: keep it out of the
+       sidebar (and its count) so the list stays about highlights/notes. */
+    const all = [...state.items]
+      .filter((item) => item.type !== "text")
+      .sort((a, b) => a.page - b.page || a.created - b.created);
     const active = state.colorFilter;
     const visible = active.size ? all.filter((item) => active.has(item.color)) : all;
     el.annoCount.textContent = active.size ? `${visible.length}/${all.length}` : String(all.length);
@@ -1666,7 +1736,9 @@
       Object.keys(COLOR_HEX)
         .map(
           (color) =>
-            `<button type="button" class="r-filter-chip${active.has(color) ? " on" : ""}" data-filter="${color}" title="${COLOR_LABEL[color]}"><span class="r-dotview" style="background:${COLOR_HEX[color]}"></span></button>`
+            `<button type="button" class="r-filter-chip${active.has(color) ? " on" : ""}" data-filter="${color}" title="${escapeHtml(
+              colorHint(color)
+            )}"${colorHintLabel(color) ? ` data-hint="${escapeHtml(colorHintLabel(color))}"` : ""}><span class="r-dotview" style="background:${COLOR_HEX[color]}"></span></button>`
         )
         .join("") +
       "</div>";
@@ -1866,13 +1938,16 @@
 
       const box = sheet.box.getBoundingClientRect();
       const pageRects = [];
-      for (const rect of span.rects) {
+      for (const { rect, em } of span.rects) {
         if (rect.width < 0.5 || rect.height < 0.5) continue;
+        /* Client rects are line boxes; store glyph-height bands so adjacent
+           lines never overlap and the mark lines up with the text. */
+        const glyph = em ? Math.min(rect.height, em * 1.12) : rect.height;
         pageRects.push({
           x: (rect.left - box.left) / state.scale,
-          y: (rect.top - box.top) / state.scale,
+          y: (rect.top + (rect.height - glyph) / 2 - box.top) / state.scale,
           w: rect.width / state.scale,
-          h: rect.height / state.scale,
+          h: glyph / state.scale,
         });
       }
       /* One band per text line, tagged with its page: painting then needs no
@@ -3298,27 +3373,26 @@
 
     /* ----------------------------------------------------- colour tags -- */
     const labels = {
-      yellow: "疑问",
-      green: "结论",
-      red: "重点",
-      blue: "证据",
-      pink: "灵感",
-      orange: "待办",
-      purple: "定义",
-      teal: "方法",
+      ...DEFAULT_COLOR_LABELS,
       ...readerPrefs.labels,
     };
     control("color-hints").checked = readerPrefs.hints !== false;
     function updateHints() {
-      document.querySelectorAll(".r-dot[data-color]").forEach((dot) => {
-        const label = `${COLOR_LABEL[dot.dataset.color]} · ${labels[dot.dataset.color]}`;
-        dot.title = control("color-hints").checked ? label : COLOR_LABEL[dot.dataset.color];
-        dot.setAttribute("aria-label", label);
-        if (control("color-hints").checked) dot.dataset.hint = labels[dot.dataset.color];
-        else delete dot.dataset.hint;
-      });
+      const on = control("color-hints").checked;
+      document
+        .querySelectorAll(".r-dot[data-color], [data-menu-color], .r-filter-chip[data-filter]")
+        .forEach((node) => {
+          const color = node.dataset.color || node.dataset.menuColor || node.dataset.filter;
+          if (!COLOR_HEX[color]) return;
+          const semantic = labels[color] || "";
+          const label = on && semantic ? `${COLOR_LABEL[color]} · ${semantic}` : COLOR_LABEL[color];
+          node.title = label;
+          node.setAttribute("aria-label", label);
+          if (on && semantic) node.dataset.hint = semantic;
+          else delete node.dataset.hint;
+        });
       readerPrefs.labels = labels;
-      readerPrefs.hints = control("color-hints").checked;
+      readerPrefs.hints = on;
       storePrefs();
     }
     control("color-hints").onchange = updateHints;
@@ -3923,7 +3997,9 @@
         `<div class="r-menu-colors">${Object.keys(COLOR_HEX)
           .map(
             (color) =>
-              `<button class="r-dot ${color}" type="button" data-menu-color="${color}" title="${COLOR_LABEL[color]}"></button>`
+              `<button class="r-dot ${color}" type="button" data-menu-color="${color}" title="${escapeHtml(
+                colorHint(color)
+              )}"${colorHintLabel(color) ? ` data-hint="${escapeHtml(colorHintLabel(color))}"` : ""}></button>`
           )
           .join("")}</div>` +
         '<hr class="r-menu-hr">' +
@@ -3979,7 +4055,9 @@
           ? `<div class="r-menu-colors">${Object.keys(COLOR_HEX)
               .map(
                 (color) =>
-                  `<button class="r-dot ${color}" type="button" data-menu-color="${color}" title="${COLOR_LABEL[color]}"></button>`
+                  `<button class="r-dot ${color}" type="button" data-menu-color="${color}" title="${escapeHtml(
+                colorHint(color)
+              )}"${colorHintLabel(color) ? ` data-hint="${escapeHtml(colorHintLabel(color))}"` : ""}></button>`
               )
               .join("")}</div>`
           : "") +
