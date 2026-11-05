@@ -1716,3 +1716,252 @@ input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
     scroll-behavior: auto !important;
   }
 }
+
+/* ==================================================================== *
+ * Entry hero — restored, richer drop target (the calm grouped version
+ * from 1.4 read as flat; this keeps the HIG chrome but brings back the
+ * large, inviting upload moment).
+ * ==================================================================== */
+@property --hero-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes hero-sweep {
+  to { --hero-angle: 360deg; }
+}
+@keyframes hero-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+@keyframes hero-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(20px, -26px, 0) scale(1.09); }
+}
+
+body[data-stage="entry"] .page-head { display: none; }
+body[data-stage="entry"] .content {
+  justify-content: center;
+  padding-bottom: 40px;
+}
+
+.stage-entry .hero {
+  position: relative;
+  width: min(600px, 100%);
+  padding: 6px 0 4px;
+  display: grid;
+  justify-items: center;
+  gap: 0;
+  text-align: center;
+  isolation: isolate;
+}
+
+.stage-entry .hero-aura {
+  position: absolute;
+  inset: -70px -20px 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.stage-entry .aura {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(66px);
+  opacity: 0.5;
+}
+.stage-entry .aura-a {
+  width: 300px;
+  height: 300px;
+  top: -30px;
+  left: 2%;
+  background: radial-gradient(circle, rgba(255, 55, 95, 0.5), transparent 68%);
+  animation: hero-drift 15s ease-in-out infinite;
+}
+.stage-entry .aura-b {
+  width: 260px;
+  height: 260px;
+  top: 100px;
+  right: 0;
+  background: radial-gradient(circle, rgba(10, 132, 255, 0.32), transparent 68%);
+  animation: hero-drift 19s ease-in-out infinite reverse;
+}
+
+.stage-entry .hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 29px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text-2);
+  font-size: 12px;
+  letter-spacing: 0.1px;
+  box-shadow: 0 1px 2px rgba(17, 17, 26, 0.03);
+}
+
+.stage-entry .hero-title {
+  margin: 20px 0 0;
+  font-size: clamp(27px, 4.4vw, 38px);
+  line-height: 1.24;
+  font-weight: 680;
+  letter-spacing: -0.9px;
+}
+.stage-entry .hero-title .grad {
+  background: linear-gradient(96deg, #ff7a95, var(--accent) 46%, #ff9a6b);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.stage-entry .hero-sub {
+  margin: 12px 0 0;
+  max-width: 30em;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.stage-entry .hero-drop {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  width: min(520px, 100%);
+  margin-top: 30px;
+  padding: 34px 28px 30px;
+  border: 1.5px dashed var(--line-strong);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line-strong));
+  border-radius: 26px;
+  background:
+    linear-gradient(180deg, var(--drop-glow), transparent 72%),
+    var(--card);
+  box-shadow: 0 1px 2px rgba(17, 17, 26, 0.04), 0 18px 44px -26px rgba(17, 17, 26, 0.35);
+  cursor: pointer;
+  outline: none;
+  isolation: isolate;
+  transition:
+    transform 0.34s cubic-bezier(0.2, 0.8, 0.3, 1),
+    box-shadow 0.34s ease,
+    border-color 0.22s ease,
+    background 0.3s ease;
+}
+.stage-entry .hero-drop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(255, 55, 95, 0.1), transparent 56%);
+  pointer-events: none;
+}
+@supports ((-webkit-mask-composite: xor) or (mask-composite: exclude)) {
+  .stage-entry .hero-drop::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: 2;
+    padding: 2px;
+    border-radius: inherit;
+    background: conic-gradient(
+      from var(--hero-angle, 0deg),
+      transparent 0deg,
+      transparent 150deg,
+      rgba(255, 55, 95, 0.45) 245deg,
+      rgba(255, 96, 128, 0.85) 315deg,
+      transparent 360deg
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    opacity: 0.6;
+    animation: hero-sweep 7.5s linear infinite;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+  }
+}
+.stage-entry .hero-drop > * { position: relative; z-index: 1; }
+.stage-entry .hero-drop:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(17, 17, 26, 0.04), 0 26px 50px -26px rgba(255, 55, 95, 0.5);
+}
+.stage-entry .hero-drop:hover::before { opacity: 0.95; }
+.stage-entry .hero-drop:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 5px var(--accent-ring), 0 20px 40px -24px rgba(255, 55, 95, 0.4);
+}
+.stage-entry .hero-drop.is-over {
+  border-style: solid;
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-soft), var(--card) 74%);
+  transform: scale(1.02) translateY(-2px);
+  box-shadow: 0 0 0 8px var(--accent-soft), 0 30px 60px -28px rgba(255, 55, 95, 0.55);
+}
+.stage-entry .hero-drop.is-over::before { opacity: 1; }
+.stage-entry .hero-drop.is-over .hero-icon { animation-duration: 1.2s; }
+.stage-entry .hero-drop.is-over .hero-drop-sub { color: var(--accent); }
+.stage-entry .hero-drop.is-over .hero-chips span { border-color: var(--accent-ring); color: var(--accent); }
+
+.stage-entry .hero-icon {
+  display: grid;
+  place-items: center;
+  width: 74px;
+  height: 74px;
+  border-radius: 22px;
+  color: #fff;
+  background: linear-gradient(160deg, #ff8aa0, #ff375f 52%, #e01c48);
+  box-shadow: 0 16px 32px -12px rgba(255, 55, 95, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  animation: hero-bob 5.2s ease-in-out infinite;
+}
+
+.stage-entry .hero-drop-title {
+  margin-top: 18px;
+  font-size: 17px;
+  font-weight: 620;
+  letter-spacing: -0.2px;
+}
+.stage-entry .hero-drop-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-3);
+  transition: color 0.2s ease;
+}
+.stage-entry .hero-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 18px;
+}
+.stage-entry .hero-chips span {
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card-soft);
+  color: var(--text-2);
+  font-size: 11.5px;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.stage-entry .hero-foot {
+  display: block;
+  margin: 16px 0 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+body[data-stage="entry"] .stage-entry.stage-enter .hero-badge { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards 0.04s; }
+body[data-stage="entry"] .stage-entry.stage-enter .hero-title { animation: rise 0.56s cubic-bezier(0.2, 0.7, 0.2, 1) backwards 0.1s; }
+body[data-stage="entry"] .stage-entry.stage-enter .hero-sub { animation: rise 0.56s cubic-bezier(0.2, 0.7, 0.2, 1) backwards 0.16s; }
+body[data-stage="entry"] .stage-entry.stage-enter .hero-drop { animation: rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) backwards 0.22s; }
+body[data-stage="entry"] .stage-entry.stage-enter .hero-foot { animation: rise 0.56s cubic-bezier(0.2, 0.7, 0.2, 1) backwards 0.3s; }
+
+@media (max-height: 760px) {
+  body[data-stage="entry"] .content { justify-content: flex-start; }
+  .stage-entry .hero-title { margin-top: 14px; font-size: clamp(24px, 3.8vw, 32px); }
+  .stage-entry .hero-drop { margin-top: 20px; padding: 24px 22px 22px; }
+  .stage-entry .hero-icon { width: 60px; height: 60px; border-radius: 18px; }
+  .stage-entry .hero-icon svg { width: 24px; height: 24px; }
+}
+@media (max-width: 560px) {
+  .stage-entry .hero-title { font-size: 25px; }
+  .stage-entry .hero-drop { padding: 26px 18px 24px; border-radius: 22px; }
+}

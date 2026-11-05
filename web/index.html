@@ -56,31 +56,41 @@
          上传前只显示「文档」一组；设置项在上传后（.stage-work）才出现。 -->
     <section class="stage stage-entry" id="stage-entry" aria-label="添加 PDF">
       <div class="hero">
-        <section class="group" aria-labelledby="entry-doc-title">
-          <h3 class="group-title" id="entry-doc-title">文档</h3>
-          <div class="group-card hero-card">
-            <div class="hero-drop" id="hero-drop" role="button" tabindex="0"
-                 aria-label="拖拽 PDF 到此处，或点击选择文件">
-              <span class="hero-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor"
-                     stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 3.5v10.5"/>
-                  <path d="m7.8 10 4.2 4.2L16.2 10"/>
-                  <path d="M4 15.2v2.9A2.9 2.9 0 0 0 6.9 21h10.2a2.9 2.9 0 0 0 2.9-2.9v-2.9"/>
-                </svg>
-              </span>
-              <strong class="hero-drop-title" id="hero-drop-title">拖拽 PDF 到此处</strong>
-              <span class="hero-drop-sub">或点击选择文件 · 支持一次拖入多个</span>
-              <span class="hero-chips" aria-hidden="true">
-                <span>保留排版</span><span>双语对照</span><span>术语统一</span>
-              </span>
-            </div>
-          </div>
-          <p class="hero-foot">
-            <span class="hero-foot-item"><i class="beacon" aria-hidden="true"></i>本地运行 · 密钥不出本机</span>
-            <span class="hero-foot-item">上传后再挑选语言、翻译模型与术语库</span>
-          </p>
-        </section>
+        <div class="hero-aura" aria-hidden="true">
+          <span class="aura aura-a"></span>
+          <span class="aura aura-b"></span>
+        </div>
+
+        <span class="hero-badge">
+          <i class="beacon" aria-hidden="true"></i>本地运行 · 密钥不出本机
+        </span>
+
+        <h2 class="hero-title">
+          把 PDF 拖进来<br>
+          <span class="grad">版式照旧</span>，只换语言
+        </h2>
+        <p class="hero-sub">公式、图表、双栏与页码都留在原位，译文以双语对照呈现。</p>
+
+        <div class="hero-drop" id="hero-drop" role="button" tabindex="0"
+             aria-label="拖拽 PDF 到此处，或点击选择文件">
+          <span class="hero-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor"
+                 stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3.5v11"/>
+              <path d="m7.5 10.5 4.5 4.5 4.5-4.5"/>
+              <path d="M4 15.4v2.7A2.9 2.9 0 0 0 6.9 21h10.2a2.9 2.9 0 0 0 2.9-2.9v-2.7"/>
+            </svg>
+          </span>
+          <strong class="hero-drop-title" id="hero-drop-title">拖拽 PDF 到此处</strong>
+          <span class="hero-drop-sub">或点击选择文件 · 支持一次拖入多个</span>
+          <span class="hero-chips" aria-hidden="true">
+            <span>保留排版</span><span>双语对照</span><span>术语统一</span>
+          </span>
+        </div>
+
+        <p class="hero-foot">上传后再挑选语言、翻译模型与术语库</p>
+      </div>
+    </section>
       </div>
     </section>
 
