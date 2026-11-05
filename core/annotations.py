@@ -16,7 +16,16 @@ from pathlib import Path
 from . import config
 
 ANNOTATION_DIR = config.APP_DIR / "annotations"
-COLORS = {"yellow", "green", "blue", "pink"}
+COLORS = {
+    "yellow",
+    "green",
+    "blue",
+    "pink",
+    "orange",
+    "purple",
+    "teal",
+    "red",
+}
 MAX_ITEMS = 4000
 MAX_RECTS = 240
 MAX_RANGES = 32
@@ -54,14 +63,17 @@ def _sanitize(items) -> list[dict]:
         for rect in list(item.get("rects") or [])[:MAX_RECTS]:
             if not isinstance(rect, dict):
                 continue
-            rects.append(
-                {
-                    "x": _number(rect.get("x"), 0, 100000),
-                    "y": _number(rect.get("y"), 0, 100000),
-                    "w": _number(rect.get("w"), 0, 100000),
-                    "h": _number(rect.get("h"), 0, 100000),
-                }
-            )
+            box = {
+                "x": _number(rect.get("x"), 0, 100000),
+                "y": _number(rect.get("y"), 0, 100000),
+                "w": _number(rect.get("w"), 0, 100000),
+                "h": _number(rect.get("h"), 0, 100000),
+            }
+            # A highlight may run from one page into the next; keeping the page
+            # on every band lets the reader paint it without the text layer.
+            if rect.get("page") is not None:
+                box["page"] = int(_number(rect.get("page"), 1, 100000))
+            rects.append(box)
         # Character offsets into the page's text layer: the precise way to
         # paint a highlight, and stable across zoom levels and re-renders.
         ranges = []

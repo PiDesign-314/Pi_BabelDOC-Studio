@@ -32,6 +32,7 @@ from core import (  # noqa: E402
     config,
     glossary,
     library,
+    pdfexport,
     pdfinfo,
     presets,
     providers,
@@ -493,6 +494,7 @@ def library_index():
             "items": items,
             "dirs": library.watched_dirs(),
             "extra_dirs": library.extra_dirs(),
+            "collections": library.collections(),
         }
     )
 
@@ -526,6 +528,55 @@ def serve_document():
         conditional=True,
         download_name=target.name,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Collections (paper groups inside the library)
+# --------------------------------------------------------------------------- #
+@app.get("/api/collections")
+def get_collections():
+    return _json({"collections": library.collections()})
+
+
+@app.post("/api/collections")
+def create_collection():
+    payload = request.get_json(silent=True) or {}
+    try:
+        entry = library.create_collection(payload.get("name") or "")
+    except ValueError as exc:
+        return _error(str(exc), 400)
+    return _json({"collection": entry, "collections": library.collections()})
+
+
+@app.post("/api/collections/<collection_id>")
+def rename_collection(collection_id: str):
+    payload = request.get_json(silent=True) or {}
+    try:
+        entry = library.rename_collection(collection_id, payload.get("name") or "")
+    except FileNotFoundError as exc:
+        return _error(str(exc), 404)
+    except ValueError as exc:
+        return _error(str(exc), 400)
+    return _json({"collection": entry, "collections": library.collections()})
+
+
+@app.delete("/api/collections/<collection_id>")
+def delete_collection(collection_id: str):
+    try:
+        library.delete_collection(collection_id)
+    except FileNotFoundError as exc:
+        return _error(str(exc), 404)
+    return _json({"collections": library.collections()})
+
+
+@app.post("/api/collections/assign")
+def assign_collections():
+    payload = request.get_json(silent=True) or {}
+    item = str(payload.get("item") or "").strip()
+    if not item:
+        return _error("缺少要归类的条目", 400)
+    ids = [str(value) for value in (payload.get("collections") or [])]
+    return _json({"collections": library.assign_collections(item, ids)})
 
 
 @app.post("/api/library/rename")
@@ -602,6 +653,44 @@ def save_annotations():
     data["path"] = str(target)
     data["doc_id"] = annotations.document_id(target)
     return _json(data)
+
+
+@app.post("/api/annotations/export")
+def export_annotations_pdf():
+    """Write the reader's highlights and notes into a shareable PDF copy."""
+    payload = request.get_json(silent=True) or {}
+    target = _allowed_file(payload.get("path", ""), (".pdf",))
+    if not target:
+        return _error("文件不可用", 404)
+    items = payload.get("items")
+    if items is None:
+        items = annotations.load(target)["items"]
+    try:
+        result = pdfexport.export(target, items)
+    except OSError:
+        # A read-only output folder must not cost the user their notes.
+        fallback = config.APP_DIR / "exports" / pdfexport.default_target(target).name
+        try:
+            result = pdfexport.export(target, items, fallback)
+        except Exception as exc:
+            return _error(f"导出失败：{exc}", 500)
+    except Exception as exc:
+        return _error(f"导出失败：{exc}", 500)
+    result["name"] = Path(result["path"]).name
+    return _json(result)
+
+
+@app.get("/api/annotations/pdf")
+def read_annotations_pdf():
+    """Annotations already embedded in a PDF (e.g. shared from another machine)."""
+    target = _allowed_file(request.args.get("path", ""), (".pdf",))
+    if not target:
+        return _error("文件不可用", 404)
+    try:
+        items = pdfexport.read(target)
+    except Exception as exc:
+        return _error(f"无法读取 PDF 批注：{exc}", 500)
+    return _json({"items": items, "count": len(items)})
 
 
 # --------------------------------------------------------------------------- #

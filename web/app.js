@@ -69,6 +69,10 @@
     btnAdvanced: $("#btn-advanced"),
     advanced: $("#advanced"),
     progressBlock: $("#progress-block"),
+    jobCard: $("#job-card"),
+    jobName: $("#job-name"),
+    jobMeta: $("#job-meta"),
+    jobNote: $("#job-note"),
     stage: $("#stage"),
     percent: $("#percent"),
     barFill: $("#bar-fill"),
@@ -706,16 +710,67 @@
   }
 
   function applyJob(job) {
-    el.stage.textContent = job.stage || "运行中";
     const progress = Number(job.progress) || 0;
+    el.stage.textContent = job.stage || "运行中";
     el.percent.textContent = `${Math.round(progress)}%`;
     el.barFill.classList.toggle("indeterminate", progress <= 0 && job.status === "running");
     el.barFill.style.width = progress > 0 ? `${Math.min(progress, 100)}%` : "";
+    el.jobCard.dataset.state =
+      job.status === "succeeded"
+        ? "done"
+        : job.status === "failed"
+          ? "failed"
+          : job.status === "cancelled"
+            ? "cancelled"
+            : "running";
+    renderJobCard(job);
     if (job.logs && job.logs.length) {
       el.log.textContent += job.logs.join("\n") + "\n";
       el.log.scrollTop = el.log.scrollHeight;
     }
     renderUsage(job);
+  }
+
+  /* The card mirrors the file being translated: name, size, percent and how
+     long it has been running. */
+  function renderJobCard(job) {
+    const files = state.files || [];
+    if (files.length === 1) {
+      el.jobName.textContent = files[0].name;
+    } else if (files.length > 1) {
+      el.jobName.textContent = `${files.length} 个文件`;
+    }
+    el.jobName.title = files.map((file) => file.name).join("\n");
+
+    const totalBytes = files.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
+    const totalPages = files.reduce((sum, file) => sum + (Number(file.pages) || 0), 0);
+    const bits = [];
+    if (totalBytes) bits.push(formatSize(totalBytes));
+    if (totalPages) bits.push(`${totalPages} 页`);
+    el.jobMeta.textContent = bits.join(" · ");
+
+    const seconds = jobSeconds(job);
+    if (!seconds) {
+      el.jobNote.textContent = "刚刚开始";
+    } else {
+      el.jobNote.textContent = `${job.finished_at ? "用时" : "已用"} ${formatDuration(seconds)}`;
+    }
+  }
+
+  function jobSeconds(job) {
+    const started = Number(job.started_at) || 0;
+    if (!started) return 0;
+    const end = job.finished_at ? Number(job.finished_at) : Date.now() / 1000;
+    return Math.max(0, end - started);
+  }
+
+  function formatDuration(seconds) {
+    const total = Math.max(0, Math.round(seconds));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const rest = total % 60;
+    const pad = (value) => String(value).padStart(2, "0");
+    return hours ? `${hours}:${pad(minutes)}:${pad(rest)}` : `${minutes}:${pad(rest)}`;
   }
 
   function formatTokens(value) {
@@ -829,6 +884,7 @@
       el.log.textContent = "";
       el.usageLine.hidden = true;
       el.resultCard.hidden = true;
+      el.jobCard.dataset.state = "running";
       el.barFill.style.width = "0%";
       el.barFill.classList.add("indeterminate");
       el.progressBlock.hidden = false;
@@ -862,16 +918,20 @@
     setRunning(false);
     el.barFill.classList.remove("indeterminate");
     renderUsage(job);
+    renderJobCard(job);
     if (job.status === "succeeded") {
+      el.jobCard.dataset.state = "done";
       el.barFill.style.width = "100%";
       el.percent.textContent = "100%";
       el.stage.textContent = "翻译完成";
       toast("翻译完成", "good");
       renderResults(job.results);
     } else if (job.status === "cancelled") {
+      el.jobCard.dataset.state = "cancelled";
       el.stage.textContent = "已取消";
       toast("任务已取消");
     } else {
+      el.jobCard.dataset.state = "failed";
       el.stage.textContent = "翻译失败";
       toast(job.error || "翻译失败，请查看日志", "bad");
       if (!el.log.hidden) el.log.scrollTop = el.log.scrollHeight;

@@ -199,3 +199,138 @@ def test_annotations_api_roundtrip(tmp_path, monkeypatch, annotation_dir):
         "/api/annotations", query_string={"path": str(tmp_path.parent / "nope.pdf")}
     )
     assert blocked.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Collections
+# --------------------------------------------------------------------------- #
+@pytest.fixture()
+def library_file(tmp_path, monkeypatch):
+    target = tmp_path / "library.json"
+    monkeypatch.setattr(library, "LIBRARY_FILE", target)
+    return target
+
+
+def test_collection_lifecycle(library_file):
+    entry = library.create_collection("FDM 声学研究")
+    assert entry["name"] == "FDM 声学研究"
+    assert entry["items"] == []
+    assert [item["id"] for item in library.collections()] == [entry["id"]]
+
+    renamed = library.rename_collection(entry["id"], "声学与制造")
+    assert renamed["name"] == "声学与制造"
+
+    assert library.delete_collection(entry["id"]) is True
+    assert library.collections() == []
+
+    with pytest.raises(FileNotFoundError):
+        library.delete_collection(entry["id"])
+
+
+def test_collection_name_rules(library_file):
+    with pytest.raises(ValueError):
+        library.create_collection("   ")
+    library.create_collection("论文")
+    with pytest.raises(ValueError):
+        library.create_collection("论文")
+    with pytest.raises(ValueError):
+        library.create_collection("a/b")
+    with pytest.raises(ValueError):
+        library.create_collection("x" * 41)
+
+
+def test_assign_collections_is_exclusive(library_file):
+    first = library.create_collection("第一组")
+    second = library.create_collection("第二组")
+
+    library.assign_collections("paper-1", [first["id"], second["id"]])
+    stored = {entry["name"]: entry["items"] for entry in library.collections()}
+    assert stored == {"第一组": ["paper-1"], "第二组": ["paper-1"]}
+
+    library.assign_collections("paper-1", [second["id"]])
+    stored = {entry["name"]: entry["items"] for entry in library.collections()}
+    assert stored == {"第一组": [], "第二组": ["paper-1"]}
+
+    known = library.assign_collections("paper-1", [])
+    assert all(not entry["items"] for entry in known)
+
+
+def test_scan_exposes_membership(output_dir, library_file):
+    make(output_dir / "论文A_译文.pdf")
+    make(output_dir / "论文B_译文.pdf")
+    entry = library.create_collection("合集")
+    item_id = library._item_id(str(output_dir.resolve()), "论文A")
+    library.assign_collections(item_id, [entry["id"]])
+
+    items = {item["name"]: item for item in library.scan()}
+    assert items["论文A"]["collections"] == [entry["id"]]
+    assert items["论文B"]["collections"] == []
+
+
+def test_rename_keeps_collections(output_dir, annotation_dir, library_file):
+    make(output_dir / "旧名_译文.pdf")
+    entry = library.create_collection("合集")
+    old_id = library._item_id(str(output_dir.resolve()), "旧名")
+    library.assign_collections(old_id, [entry["id"]])
+
+    library.rename(str(output_dir), "旧名", "新名")
+
+    items = library.scan()
+    assert items[0]["name"] == "新名"
+    assert items[0]["collections"] == [entry["id"]]
+
+
+def test_delete_drops_collections(output_dir, library_file):
+    make(output_dir / "论文A_译文.pdf")
+    entry = library.create_collection("合集")
+    item_id = library._item_id(str(output_dir.resolve()), "论文A")
+    library.assign_collections(item_id, [entry["id"]])
+
+    library.delete(str(output_dir), "论文A")
+
+    assert library.collections()[0]["items"] == []
+
+
+def test_collections_api(tmp_path, monkeypatch, library_file, output_dir):
+    import app as studio
+
+    client = studio.app.test_client()
+
+    created = client.post("/api/collections", json={"name": "FDM"})
+    assert created.status_code == 200
+    collection = created.get_json()["collection"]
+
+    duplicated = client.post("/api/collections", json={"name": "FDM"})
+    assert duplicated.status_code == 400
+
+    make(output_dir / "论文A_译文.pdf")
+    item_id = library._item_id(str(output_dir.resolve()), "论文A")
+    assigned = client.post(
+        "/api/collections/assign", json={"item": item_id, "collections": [collection["id"]]}
+    )
+    assert assigned.status_code == 200
+    assert assigned.get_json()["collections"][0]["items"] == [item_id]
+
+    missing = client.post("/api/collections/assign", json={"item": "", "collections": []})
+    assert missing.status_code == 400
+
+    renamed = client.post(f"/api/collections/{collection['id']}", json={"name": "FDM 声学"})
+    assert renamed.status_code == 200
+
+    deleted = client.delete(f"/api/collections/{collection['id']}")
+    assert deleted.status_code == 200
+    assert deleted.get_json()["collections"] == []
+
+
+def test_library_api_includes_collections(output_dir, library_file):
+    import app as studio
+
+    make(output_dir / "论文A_译文.pdf")
+    entry = library.create_collection("合集")
+    item_id = library._item_id(str(output_dir.resolve()), "论文A")
+    library.assign_collections(item_id, [entry["id"]])
+
+    client = studio.app.test_client()
+    data = client.get("/api/library").get_json()
+    assert [item["id"] for item in data["collections"]] == [entry["id"]]
+    assert data["items"][0]["collections"] == [entry["id"]]

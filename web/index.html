@@ -338,14 +338,31 @@
 
       <section class="card action-card">
         <div class="progress-block" id="progress-block" hidden>
-          <div class="progress-top">
-            <span class="stage" id="stage">准备中</span>
-            <span class="percent" id="percent">0%</span>
+          <div class="job-card" id="job-card" data-state="running">
+            <div class="job-fill" id="bar-fill"></div>
+            <div class="job-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor"
+                   stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+                <path d="M6.2 2.8h7.2L18 7.4V20a1.2 1.2 0 0 1-1.2 1.2H6.2A1.2 1.2 0 0 1 5 20V4a1.2 1.2 0 0 1 1.2-1.2Z"/>
+                <path d="M13.2 3v4.6h4.6"/>
+                <path d="M8.4 12.6h6.2M8.4 15.8h4.2"/>
+              </svg>
+            </div>
+            <div class="job-main">
+              <strong class="job-name" id="job-name">准备中…</strong>
+              <span class="job-meta" id="job-meta"></span>
+            </div>
+            <div class="job-side">
+              <strong class="job-percent" id="percent">0%</strong>
+              <span class="job-note" id="job-note"></span>
+            </div>
           </div>
-          <div class="bar"><div class="bar-fill" id="bar-fill"></div></div>
-          <button class="log-toggle" id="btn-log" type="button" aria-expanded="false">
-            运行日志 <span class="chev">›</span>
-          </button>
+          <div class="job-foot">
+            <span class="job-stage" id="stage">准备中</span>
+            <button class="log-toggle" id="btn-log" type="button" aria-expanded="false">
+              运行日志 <span class="chev">›</span>
+            </button>
+          </div>
           <pre class="log" id="log" hidden></pre>
         </div>
 

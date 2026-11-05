@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -25,7 +25,7 @@
     </div>
     <div class="brand-text">
       <h1>结果库</h1>
-      <p>翻译完成的文件都在这里 · 可阅读、批注、整理</p>
+      <p>翻译完成的文件都在这里 · 可阅读、批注、按合集整理</p>
     </div>
   </div>
   <div class="topbar-right">
@@ -45,48 +45,89 @@
 </header>
 
 <main class="lib-wrap">
-  <div class="lib-head">
-    <div class="lib-title">
-      <h2>全部结果<span class="lib-count" id="lib-count">0</span></h2>
-    </div>
-    <div class="lib-controls">
-      <label class="lib-search">
+  <aside class="lib-rail" id="rail">
+    <div class="rail-block">
+      <button class="rail-item on" type="button" data-filter="all">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
-          <circle cx="7" cy="7" r="4.6"/>
-          <path d="m10.5 10.5 3 3"/>
+             stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2.2 5.4 8 2.4l5.8 3-5.8 3z"/>
+          <path d="m2.2 8.6 5.8 3 5.8-3"/>
         </svg>
-        <input id="search" type="search" placeholder="搜索文件名…" spellcheck="false" autocomplete="off">
-      </label>
-      <select id="sort" class="lib-sort" aria-label="排序方式">
-        <option value="recent">最近修改</option>
-        <option value="name">按名称</option>
-        <option value="size">按大小</option>
-      </select>
-      <button class="btn btn-secondary" id="btn-add-dir" type="button">添加文件夹</button>
+        <span class="rail-name">全部结果</span>
+        <em id="count-all">0</em>
+      </button>
+      <button class="rail-item" type="button" data-filter="unfiled">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="1.5" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.4"/>
+          <path d="M8 5.2v3.4l2.2 1.6" stroke-linecap="round"/>
+        </svg>
+        <span class="rail-name">未分类</span>
+        <em id="count-unfiled">0</em>
+      </button>
     </div>
-  </div>
 
-  <div class="lib-dirs" id="dirs" hidden></div>
-
-  <div class="lib-grid" id="grid" aria-live="polite"></div>
-
-  <div class="lib-empty" id="empty" hidden>
-    <div class="lib-empty-icon" aria-hidden="true">
-      <svg viewBox="0 0 48 48" width="42" height="42" fill="none" stroke="currentColor"
-           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M9 12.5h11l3.5 4H39a2 2 0 0 1 2 2v18a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-22a2 2 0 0 1 2-2Z"/>
-        <path d="M24 26v8m0 0 3.5-3.5M24 34l-3.5-3.5"/>
-      </svg>
+    <div class="rail-head">
+      <span>合集</span>
+      <button class="rail-add" id="btn-new-collection" type="button" title="新建合集">＋</button>
     </div>
-    <h3 id="empty-title">还没有翻译结果</h3>
-    <p id="empty-text">翻译完成后，文件会自动出现在这里：可以阅读、做批注、重命名或清理。</p>
-    <div class="lib-empty-actions">
-      <a class="btn btn-primary" href="/">去翻译 PDF</a>
-      <button class="btn btn-secondary" id="btn-add-dir-2" type="button">添加已有文件夹</button>
+    <div class="rail-list" id="rail-list"></div>
+    <p class="rail-empty" id="rail-empty">还没有合集。<br>点「＋」按主题把论文分组。</p>
+  </aside>
+
+  <section class="lib-main">
+    <div class="lib-head">
+      <div class="lib-title">
+        <h2><span id="lib-title">全部结果</span><span class="lib-count" id="lib-count">0</span></h2>
+      </div>
+      <div class="lib-controls">
+        <label class="lib-search">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.6"/>
+            <path d="m10.5 10.5 3 3"/>
+          </svg>
+          <input id="search" type="search" placeholder="搜索文件名…" spellcheck="false" autocomplete="off">
+        </label>
+        <select id="sort" class="lib-sort" aria-label="排序方式">
+          <option value="recent">最近修改</option>
+          <option value="name">按名称</option>
+          <option value="size">按大小</option>
+        </select>
+        <button class="btn btn-secondary" id="btn-add-dir" type="button">添加文件夹</button>
+      </div>
     </div>
-  </div>
+
+    <div class="lib-dirs" id="dirs" hidden></div>
+
+    <div class="lib-grid" id="grid" aria-live="polite"></div>
+
+    <div class="lib-empty" id="empty" hidden>
+      <div class="lib-empty-icon" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="42" height="42" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 12.5h11l3.5 4H39a2 2 0 0 1 2 2v18a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-22a2 2 0 0 1 2-2Z"/>
+          <path d="M24 26v8m0 0 3.5-3.5M24 34l-3.5-3.5"/>
+        </svg>
+      </div>
+      <h3 id="empty-title">还没有翻译结果</h3>
+      <p id="empty-text">翻译完成后，文件会自动出现在这里：可以阅读、做批注、重命名或清理。</p>
+      <div class="lib-empty-actions">
+        <a class="btn btn-primary" href="/">去翻译 PDF</a>
+        <button class="btn btn-secondary" id="btn-add-dir-2" type="button">添加已有文件夹</button>
+      </div>
+    </div>
+  </section>
 </main>
+
+<div class="lib-pop" id="collect-pop" hidden>
+  <div class="lib-pop-head">归入合集 <span id="collect-target"></span></div>
+  <div class="lib-pop-list" id="collect-list"></div>
+  <form class="lib-pop-form" id="collect-form">
+    <input id="collect-name" type="text" placeholder="新建合集并归入…" maxlength="40" autocomplete="off">
+    <button type="submit">创建</button>
+  </form>
+</div>
 
 <div class="toasts" id="toasts"></div>
 

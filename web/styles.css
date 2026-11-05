@@ -856,41 +856,163 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 /* progress -------------------------------------------------------------- */
 .progress-block { margin-bottom: 18px; }
 
-.progress-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 9px;
-}
-.stage { font-size: 13.5px; font-weight: 600; }
-.percent { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text-2); }
-
-.bar {
-  height: 8px;
-  border-radius: 999px;
-  background: var(--line);
+/* The job card: a soft gradient fill grows behind the file row, so progress is
+   readable at a glance without a separate bar. */
+.job-card {
+  --job-a: #e6dcff;
+  --job-b: #ffdbe7;
+  position: relative;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 16px 13px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--card);
   overflow: hidden;
+  isolation: isolate;
 }
 
-.bar-fill {
-  height: 100%;
+.job-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
   width: 0%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #ff8fa6, var(--accent));
-  transition: width 0.4s ease;
+  z-index: -1;
+  background: linear-gradient(90deg, var(--job-a), var(--job-b));
+  /* a soft leading edge, so the fill reads as a gradient rather than a block */
+  -webkit-mask-image: linear-gradient(90deg, #000 0 calc(100% - 22px), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0 calc(100% - 22px), transparent 100%);
+  transition: width 0.55s cubic-bezier(0.2, 0.7, 0.2, 1), background 0.3s ease;
 }
-.bar-fill.indeterminate {
+.job-fill.indeterminate {
   width: 35%;
   animation: slide 1.4s ease-in-out infinite;
 }
-
 @keyframes slide {
   0% { transform: translateX(-120%); }
   100% { transform: translateX(330%); }
 }
 
+.job-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: #fff;
+  color: #3f6ff0;
+  box-shadow: 0 1px 2px rgba(17, 17, 26, 0.1), 0 6px 14px -8px rgba(23, 30, 80, 0.55);
+  transition: color 0.25s ease;
+}
+
+.job-main { min-width: 0; }
+
+.job-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 640;
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-meta {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.job-side { text-align: right; flex: none; }
+
+.job-percent {
+  display: block;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.job-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.job-card[data-state="done"] .job-fill {
+  background: linear-gradient(90deg, #cdf0dd, #d9f6e8);
+}
+.job-card[data-state="failed"] .job-fill {
+  background: linear-gradient(90deg, #ffd9d9, #ffc9d1);
+}
+.job-card[data-state="cancelled"] .job-fill {
+  background: linear-gradient(90deg, var(--line), var(--line));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .job-card {
+    --job-a: rgba(126, 104, 255, 0.3);
+    --job-b: rgba(255, 105, 150, 0.22);
+  }
+  :root:not([data-theme="light"]) .job-icon { background: #23232c; color: #8ab0ff; }
+  :root:not([data-theme="light"]) .job-card[data-state="done"] .job-fill {
+    background: linear-gradient(90deg, rgba(60, 200, 140, 0.32), rgba(60, 200, 140, 0.2));
+  }
+  :root:not([data-theme="light"]) .job-card[data-state="failed"] .job-fill {
+    background: linear-gradient(90deg, rgba(255, 90, 90, 0.32), rgba(255, 90, 120, 0.22));
+  }
+}
+:root[data-theme="dark"] .job-card {
+  --job-a: rgba(126, 104, 255, 0.3);
+  --job-b: rgba(255, 105, 150, 0.22);
+}
+:root[data-theme="dark"] .job-icon { background: #23232c; color: #8ab0ff; }
+:root[data-theme="dark"] .job-card[data-state="done"] .job-fill {
+  background: linear-gradient(90deg, rgba(60, 200, 140, 0.32), rgba(60, 200, 140, 0.2));
+}
+:root[data-theme="dark"] .job-card[data-state="failed"] .job-fill {
+  background: linear-gradient(90deg, rgba(255, 90, 90, 0.32), rgba(255, 90, 120, 0.22));
+}
+
+.job-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 9px;
+  padding: 0 2px;
+}
+
+.job-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text-2);
+}
+.job-stage::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+.job-card[data-state="done"] ~ .job-foot .job-stage::before { background: var(--green); }
+.job-card[data-state="failed"] ~ .job-foot .job-stage::before { background: var(--accent); }
+.job-card[data-state="cancelled"] ~ .job-foot .job-stage::before { background: var(--text-3); }
+
 .log-toggle {
-  margin-top: 12px;
   border: none;
   background: transparent;
   color: var(--text-2);

@@ -49,7 +49,14 @@
         </svg>
         批注
       </button>
-      <button class="r-btn wide" id="btn-export" type="button" title="导出批注为 Markdown">导出</button>
+      <button class="r-btn wide" id="btn-export" type="button" title="导出批注 / 保存带批注的 PDF"
+              aria-haspopup="menu" aria-expanded="false">
+        导出
+        <svg viewBox="0 0 10 10" width="8" height="8" fill="none" stroke="currentColor"
+             stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2.4 4 5 6.6 7.6 4"/>
+        </svg>
+      </button>
     </div>
 
     <span class="r-saved" id="save-state"></span>
@@ -102,6 +109,10 @@
   <button class="r-dot green" type="button" data-color="green" title="绿色高亮"></button>
   <button class="r-dot blue" type="button" data-color="blue" title="蓝色高亮"></button>
   <button class="r-dot pink" type="button" data-color="pink" title="粉色高亮"></button>
+  <button class="r-dot orange" type="button" data-color="orange" title="橙色高亮"></button>
+  <button class="r-dot purple" type="button" data-color="purple" title="紫色高亮"></button>
+  <button class="r-dot teal" type="button" data-color="teal" title="青色高亮"></button>
+  <button class="r-dot red" type="button" data-color="red" title="红色高亮"></button>
   <span class="r-vsep"></span>
   <button class="r-sel-action" id="sel-note" type="button">写批注</button>
   <button class="r-sel-action" id="sel-copy" type="button">复制</button>
@@ -111,10 +122,14 @@
   <div class="r-editor-top">
     <span class="r-editor-page" id="editor-page"></span>
     <div class="r-colors" id="editor-colors">
-      <button class="r-dot yellow" type="button" data-color="yellow"></button>
-      <button class="r-dot green" type="button" data-color="green"></button>
-      <button class="r-dot blue" type="button" data-color="blue"></button>
-      <button class="r-dot pink" type="button" data-color="pink"></button>
+      <button class="r-dot yellow" type="button" data-color="yellow" title="黄色"></button>
+      <button class="r-dot green" type="button" data-color="green" title="绿色"></button>
+      <button class="r-dot blue" type="button" data-color="blue" title="蓝色"></button>
+      <button class="r-dot pink" type="button" data-color="pink" title="粉色"></button>
+      <button class="r-dot orange" type="button" data-color="orange" title="橙色"></button>
+      <button class="r-dot purple" type="button" data-color="purple" title="紫色"></button>
+      <button class="r-dot teal" type="button" data-color="teal" title="青色"></button>
+      <button class="r-dot red" type="button" data-color="red" title="红色"></button>
     </div>
     <button class="r-editor-close" id="editor-close" type="button" aria-label="关闭">✕</button>
   </div>
@@ -127,6 +142,9 @@
 </div>
 
 <div class="toasts" id="toasts"></div>
+
+<div class="r-tip" id="tip" hidden></div>
+<div class="r-menu" id="menu" hidden></div>
 
 <script src="/assets/pdfjs/build/pdf.min.js"></script>
 <script src="/assets/shared.js"></script>

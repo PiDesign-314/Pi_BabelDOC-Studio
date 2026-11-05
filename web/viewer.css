@@ -246,6 +246,7 @@ body.reader {
 }
 
 .r-scroll {
+  position: relative;
   min-height: 100%;
   padding: 20px 24px 56px;
   display: flex;
@@ -270,6 +271,9 @@ body.reader {
   background: #fff;
   border-radius: 3px;
   box-shadow: 0 2px 6px rgba(17, 17, 26, 0.1), 0 18px 44px -24px rgba(17, 17, 26, 0.45);
+  /* Isolate every page: its canvas, text layer and marks never invalidate the
+     layout or the paint of the neighbouring pages while scrolling. */
+  contain: layout paint;
 }
 
 .r-page canvas {
@@ -280,6 +284,10 @@ body.reader {
 }
 .r-page.painted canvas { opacity: 1; }
 
+/* PDF.js paints ~2 000 transparent glyph runs per page.  Painting them on every
+   scroll frame was the single biggest source of jank, so off-screen text layers
+   are skipped entirely; the page on screen keeps its layer (and therefore stays
+   selectable). */
 .r-text {
   position: absolute;
   inset: 0;
@@ -288,6 +296,8 @@ body.reader {
   text-size-adjust: none;
   -webkit-text-size-adjust: none;
   transform-origin: 0 0;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 1px;
 }
 .r-text span,
 .r-text br {
@@ -314,6 +324,10 @@ body.reader {
 .r-mark.green { background: #aeeac0; }
 .r-mark.blue { background: #bcdcff; }
 .r-mark.pink { background: #ffbdd7; }
+.r-mark.orange { background: #ffd9b0; }
+.r-mark.purple { background: #ded0ff; }
+.r-mark.teal { background: #b8f0e7; }
+.r-mark.red { background: #ffc6c0; }
 
 /* Landing flash when a sidebar card jumps to its highlight. */
 .r-mark.flash { animation: r-mark-flash 1.6s ease; }
@@ -351,6 +365,141 @@ body.reader {
 }
 .r-note:hover { transform: scale(1.12); }
 .r-note.empty { background: var(--text-3); box-shadow: none; }
+
+/* A highlighted sentence that carries a comment gets a sticky-note badge at the
+   end of its last line, so the note is visible without opening the sidebar. */
+.r-note-badge {
+  position: absolute;
+  width: 17px;
+  height: 17px;
+  margin: -8.5px 0 0 -8.5px;
+  padding: 0;
+  border: 1px solid rgba(17, 17, 26, 0.1);
+  border-radius: 5px 5px 5px 1.5px;
+  background: var(--badge-tint, #ffd54a);
+  color: rgba(17, 17, 26, 0.6);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 1px 3px rgba(17, 17, 26, 0.24);
+  transition: transform 0.14s ease, box-shadow 0.14s ease;
+  z-index: 2;
+}
+.r-note-badge svg { width: 9px; height: 9px; display: block; }
+.r-note-badge:hover,
+.r-note-badge:focus-visible {
+  transform: scale(1.3);
+  box-shadow: 0 3px 10px rgba(17, 17, 26, 0.3);
+  outline: none;
+}
+.r-note-badge.flash { animation: r-note-flash 1.4s ease; }
+
+/* Hover preview: the note behind a badge, without opening the editor. */
+.r-tip {
+  position: fixed;
+  z-index: 80;
+  width: max-content;
+  min-width: 170px;
+  max-width: 320px;
+  padding: 10px 12px 11px;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+  pointer-events: none;
+  animation: r-tip-in 0.14s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+@keyframes r-tip-in {
+  from { opacity: 0; transform: translateY(3px) scale(0.98); }
+}
+.r-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.r-tip-head .r-dotview { width: 8px; height: 8px; }
+.r-tip-quote {
+  margin: 0 0 6px;
+  padding-left: 7px;
+  border-left: 2px solid var(--accent);
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.r-tip-note {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 168px;
+  overflow: hidden;
+}
+.r-tip-foot { margin-top: 6px; font-size: 10px; color: var(--text-3); }
+
+/* Small popover menu used by the 导出 button. */
+.r-menu {
+  position: fixed;
+  z-index: 85;
+  min-width: 196px;
+  padding: 5px;
+  border-radius: 11px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+  animation: r-pop 0.14s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+.r-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 31px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+}
+.r-menu button:hover { background: var(--accent-soft); color: var(--accent); }
+.r-menu button svg { width: 13px; height: 13px; flex: none; opacity: 0.75; }
+.r-menu .r-menu-hint { margin-left: auto; font-size: 10.5px; color: var(--text-3); }
+.r-menu hr { border: none; border-top: 1px solid var(--line); margin: 4px 2px; }
+
+/* Toast with an inline action ("打开" the file that was just saved). */
+.toast.action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+  padding-right: 8px;
+}
+.toast.action button {
+  height: 24px;
+  padding: 0 11px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toast.action button:hover { background: rgba(255, 255, 255, 0.34); }
 
 .r-loading,
 .r-error {
@@ -403,6 +552,10 @@ body.reader {
 .r-dot.green { background: #74dc9e; }
 .r-dot.blue { background: #7cc4ff; }
 .r-dot.pink { background: #ff9ec7; }
+.r-dot.orange { background: #ffb066; }
+.r-dot.purple { background: #b79bff; }
+.r-dot.teal { background: #4fd6c6; }
+.r-dot.red { background: #ff8a80; }
 .r-dot.on { box-shadow: 0 0 0 2px var(--card), 0 0 0 3.5px var(--accent); }
 
 .r-vsep { width: 1px; height: 16px; background: var(--line); margin: 0 2px; }
@@ -437,8 +590,8 @@ body.reader {
 
 .r-editor-top { display: flex; align-items: center; gap: 8px; }
 .r-editor-page { font-size: 11.5px; color: var(--text-3); flex: 1; }
-.r-colors { display: flex; gap: 4px; }
-.r-colors .r-dot { width: 15px; height: 15px; }
+.r-colors { display: flex; gap: 3px; }
+.r-colors .r-dot { width: 13px; height: 13px; }
 
 .r-editor-close {
   width: 20px;

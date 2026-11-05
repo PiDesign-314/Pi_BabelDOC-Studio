@@ -1,11 +1,12 @@
-/* BabelDOC Studio — result library (browse, read, rename, clean up). */
+/* BabelDOC Studio — result library (browse, read, collections, clean up). */
 (() => {
   "use strict";
 
-  const { $, api, toast, escapeHtml, formatSize, formatTime, bindTheme } = window.Studio;
+  const { $, $$, api, toast, escapeHtml, formatSize, formatTime, bindTheme } = window.Studio;
 
   const el = {
     count: $("#lib-count"),
+    title: $("#lib-title"),
     search: $("#search"),
     sort: $("#sort"),
     addDir: $("#btn-add-dir"),
@@ -15,15 +16,29 @@
     empty: $("#empty"),
     emptyTitle: $("#empty-title"),
     emptyText: $("#empty-text"),
+    rail: $("#rail"),
+    railList: $("#rail-list"),
+    railEmpty: $("#rail-empty"),
+    railNew: $("#btn-new-collection"),
+    countAll: $("#count-all"),
+    countUnfiled: $("#count-unfiled"),
+    pop: $("#collect-pop"),
+    popList: $("#collect-list"),
+    popTarget: $("#collect-target"),
+    popForm: $("#collect-form"),
+    popName: $("#collect-name"),
   };
 
   const state = {
     items: [],
     dirs: [],
     extraDirs: [],
+    collections: [],
     query: "",
     sort: "recent",
+    filter: "all",
     timer: null,
+    collectId: null,
   };
 
   bindTheme($("#btn-theme"));
@@ -36,7 +51,12 @@
       state.items = data.items || [];
       state.dirs = data.dirs || [];
       state.extraDirs = data.extra_dirs || [];
+      state.collections = data.collections || [];
+      if (state.filter !== "all" && state.filter !== "unfiled") {
+        if (!state.collections.some((entry) => entry.id === state.filter)) state.filter = "all";
+      }
       renderDirs();
+      renderRail();
       render();
     } catch (error) {
       toast(`读取结果库失败：${error.message}`, "bad");
@@ -64,6 +84,148 @@
     } catch (error) {
       toast(error.message, "bad");
     }
+  }
+
+  /* ------------------------------------------------------- collections -- */
+  function collectionById(id) {
+    return state.collections.find((entry) => entry.id === id) || null;
+  }
+
+  function countIn(id) {
+    return state.items.filter((item) => (item.collections || []).includes(id)).length;
+  }
+
+  function currentTitle() {
+    if (state.filter === "all") return "全部结果";
+    if (state.filter === "unfiled") return "未分类";
+    const entry = collectionById(state.filter);
+    return entry ? entry.name : "全部结果";
+  }
+
+  async function createCollection(name) {
+    const data = await api("/api/collections", { method: "POST", body: { name } });
+    state.collections = data.collections || state.collections;
+    return data.collection;
+  }
+
+  async function deleteCollection(id) {
+    const entry = collectionById(id);
+    if (!entry) return;
+    if (!window.confirm(`删除合集「${entry.name}」？\n论文本身不会被删除，只是不再归在这个合集里。`)) {
+      return;
+    }
+    try {
+      const data = await api(`/api/collections/${encodeURIComponent(id)}`, { method: "DELETE" });
+      state.collections = data.collections || [];
+      if (state.filter === id) state.filter = "all";
+      await load();
+      toast("已删除合集", "good");
+    } catch (error) {
+      toast(error.message, "bad");
+    }
+  }
+
+  async function renameCollection(id, name) {
+    try {
+      const data = await api(`/api/collections/${encodeURIComponent(id)}`, {
+        method: "POST",
+        body: { name },
+      });
+      state.collections = data.collections || state.collections;
+      await load();
+      toast("已重命名合集", "good");
+    } catch (error) {
+      toast(error.message, "bad");
+      await load();
+    }
+  }
+
+  function startCollectionRename(row, entry) {
+    const nameNode = row.querySelector(".rail-name");
+    if (!nameNode) return;
+    const input = document.createElement("input");
+    input.className = "rail-input";
+    input.value = entry.name;
+    input.maxLength = 40;
+    nameNode.replaceWith(input);
+    input.focus();
+    input.select();
+    let settled = false;
+    const finish = (commit) => {
+      if (settled) return;
+      settled = true;
+      const value = input.value.trim();
+      if (!commit || !value || value === entry.name) {
+        load();
+        return;
+      }
+      renameCollection(entry.id, value);
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+  }
+
+  function startRailNew() {
+    const existing = el.railList.querySelector(".rail-new");
+    if (existing) {
+      existing.querySelector("input").focus();
+      return;
+    }
+    const row = document.createElement("div");
+    row.className = "rail-new";
+    row.innerHTML =
+      '<input type="text" maxlength="40" placeholder="合集名称" autocomplete="off">' +
+      '<button type="button" title="创建">✓</button>';
+    el.railList.append(row);
+    el.railEmpty.hidden = true;
+    const input = row.querySelector("input");
+    input.focus();
+    let settled = false;
+    const finish = async (commit) => {
+      if (settled) return;
+      const value = input.value.trim();
+      if (!commit || !value) {
+        settled = true;
+        row.remove();
+        el.railEmpty.hidden = state.collections.length > 0;
+        return;
+      }
+      settled = true;
+      try {
+        const entry = await createCollection(value);
+        row.remove();
+        /* stay on the current view: the new collection is empty and the user
+           needs to see the papers to file them */
+        await load();
+        toast(`已创建合集「${entry ? entry.name : value}」`, "good");
+      } catch (error) {
+        settled = false;
+        input.focus();
+        toast(error.message, "bad");
+      }
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+    row.querySelector("button").addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      finish(true);
+    });
   }
 
   /* ------------------------------------------------------------ render -- */
@@ -95,6 +257,31 @@
       .join("");
   }
 
+  function renderRail() {
+    el.countAll.textContent = String(state.items.length);
+    el.countUnfiled.textContent = String(
+      state.items.filter((item) => !(item.collections || []).length).length
+    );
+    for (const button of $$(".rail-item[data-filter]", el.rail)) {
+      const filter = button.dataset.filter;
+      button.classList.toggle("on", filter === state.filter);
+    }
+    el.railEmpty.hidden = state.collections.length > 0;
+    el.railList.innerHTML = state.collections
+      .map((entry) => {
+        const count = countIn(entry.id);
+        return `<div class="rail-item${entry.id === state.filter ? " on" : ""}"
+                    data-filter="${entry.id}" role="button" tabindex="0">
+          <span class="rail-dot" aria-hidden="true"></span>
+          <span class="rail-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
+          <em>${count}</em>
+          <button class="rail-tool" type="button" data-edit="${entry.id}" title="重命名">✎</button>
+          <button class="rail-tool" type="button" data-del="${entry.id}" title="删除合集">✕</button>
+        </div>`;
+      })
+      .join("");
+  }
+
   function primaryFile(item) {
     return (
       item.files.find((file) => file.name.toLowerCase().endsWith(".pdf")) ||
@@ -107,27 +294,63 @@
     return `/viewer?from=library&path=${encodeURIComponent(file.path)}`;
   }
 
-  function render() {
-    el.count.textContent = String(state.items.length);
+  function visibleItems() {
+    if (state.filter === "unfiled") {
+      return state.items.filter((item) => !(item.collections || []).length);
+    }
+    if (state.filter !== "all") {
+      return state.items.filter((item) => (item.collections || []).includes(state.filter));
+    }
+    return state.items;
+  }
 
-    if (!state.items.length) {
+  function emptyCopy() {
+    if (state.query) {
+      return {
+        title: "没有匹配的结果",
+        text: `没有文件名包含「${state.query}」的结果，换个关键词试试。`,
+        actions: false,
+      };
+    }
+    if (state.filter === "unfiled") {
+      return {
+        title: "所有论文都已归类",
+        text: "每篇论文都至少在一个合集里。点卡片上的「归类」可以调整。",
+        actions: false,
+      };
+    }
+    if (state.filter !== "all") {
+      return {
+        title: "这个合集还是空的",
+        text: "点卡片上的「归类」把论文放进这个合集。",
+        actions: false,
+      };
+    }
+    return {
+      title: "还没有翻译结果",
+      text: "翻译完成后，文件会自动出现在这里：可以阅读、做批注、重命名或清理。结果保存到别的文件夹时，也可以把它加进来。",
+      actions: true,
+    };
+  }
+
+  function render() {
+    const items = visibleItems();
+    el.title.textContent = currentTitle();
+    el.count.textContent = String(items.length);
+    renderRail();
+
+    if (!items.length) {
       el.grid.innerHTML = "";
       el.empty.hidden = false;
-      if (state.query) {
-        el.emptyTitle.textContent = "没有匹配的结果";
-        el.emptyText.textContent = `没有文件名包含「${state.query}」的结果，换个关键词试试。`;
-        el.addDir2.hidden = true;
-      } else {
-        el.emptyTitle.textContent = "还没有翻译结果";
-        el.emptyText.textContent =
-          "翻译完成后，文件会自动出现在这里：可以阅读、做批注、重命名或清理。结果保存到别的文件夹时，也可以把它加进来。";
-        el.addDir2.hidden = false;
-      }
+      const copy = emptyCopy();
+      el.emptyTitle.textContent = copy.title;
+      el.emptyText.textContent = copy.text;
+      el.addDir2.hidden = !copy.actions;
       return;
     }
 
     el.empty.hidden = true;
-    el.grid.innerHTML = state.items
+    el.grid.innerHTML = items
       .map((item, index) => {
         const primary = primaryFile(item);
         const thumb = primary
@@ -146,6 +369,11 @@
           item.annotations > 0
             ? `<span class="lib-chip notes">${item.annotations} 条批注</span>`
             : "";
+        const tags = (item.collections || [])
+          .map((id) => collectionById(id))
+          .filter(Boolean)
+          .map((entry) => `<span class="lib-tag">${escapeHtml(entry.name)}</span>`)
+          .join("");
         const pages = item.pages ? `<span class="lib-pages">${item.pages} 页</span>` : "";
         return `
           <article class="lib-card" data-id="${item.id}" style="--i:${index}">
@@ -163,9 +391,11 @@
               <p class="lib-meta">${formatTime(item.updated)} · ${item.files.length} 个文件 · ${formatSize(
                 item.size
               )}</p>
+              ${tags ? `<div class="lib-tags">${tags}</div>` : ""}
               <div class="lib-chips">${chips}${notes}</div>
               <div class="lib-actions">
                 <button type="button" data-act="read">阅读</button>
+                <button type="button" data-act="collect">归类</button>
                 <button type="button" data-act="folder">文件夹</button>
                 <button type="button" data-act="rename">重命名</button>
                 <button type="button" data-act="delete">删除</button>
@@ -174,6 +404,73 @@
           </article>`;
       })
       .join("");
+  }
+
+  /* ------------------------------------------------------ collect pop -- */
+  function openCollect(card, item, anchor) {
+    state.collectId = item.id;
+    el.popTarget.textContent = item.name;
+    el.pop.hidden = false;
+    renderCollectList();
+    const box = anchor.getBoundingClientRect();
+    const popBox = el.pop.getBoundingClientRect();
+    let left = box.left + box.width / 2 - popBox.width / 2;
+    let top = box.bottom + 8;
+    if (top + popBox.height > window.innerHeight - 10) top = box.top - popBox.height - 8;
+    left = Math.max(10, Math.min(left, window.innerWidth - popBox.width - 10));
+    top = Math.max(10, top);
+    el.pop.style.left = `${left}px`;
+    el.pop.style.top = `${top}px`;
+    el.popName.value = "";
+  }
+
+  function closeCollect() {
+    if (el.pop.hidden) return;
+    el.pop.hidden = true;
+    state.collectId = null;
+  }
+
+  function renderCollectList() {
+    const item = state.items.find((entry) => entry.id === state.collectId);
+    if (!item) {
+      el.popList.innerHTML = "";
+      return;
+    }
+    if (!state.collections.length) {
+      el.popList.innerHTML = '<p class="lib-pop-empty">还没有合集，在下面新建一个。</p>';
+      return;
+    }
+    el.popList.innerHTML = state.collections
+      .map((entry) => {
+        const checked = (item.collections || []).includes(entry.id);
+        return `<label class="lib-pop-row">
+          <input type="checkbox" data-cid="${entry.id}"${checked ? " checked" : ""}>
+          <span>${escapeHtml(entry.name)}</span>
+          <em>${countIn(entry.id)}</em>
+        </label>`;
+      })
+      .join("");
+  }
+
+  async function applyCollect() {
+    const item = state.items.find((entry) => entry.id === state.collectId);
+    if (!item) return;
+    const ids = $$("input[data-cid]", el.popList)
+      .filter((input) => input.checked)
+      .map((input) => input.dataset.cid);
+    try {
+      const data = await api("/api/collections/assign", {
+        method: "POST",
+        body: { item: item.id, collections: ids },
+      });
+      state.collections = data.collections || state.collections;
+      item.collections = ids;
+      render();
+      renderCollectList();
+    } catch (error) {
+      toast(error.message, "bad");
+      renderCollectList();
+    }
   }
 
   /* ----------------------------------------------------------- actions -- */
@@ -265,6 +562,10 @@
       if (primary) location.href = readerLink(primary);
       return;
     }
+    if (button.dataset.act === "collect") {
+      openCollect(card, item, button);
+      return;
+    }
     if (button.dataset.act === "folder") {
       revealInFolder(item);
       return;
@@ -278,11 +579,84 @@
     }
   });
 
-  el.dirs.addEventListener("click", (event) => {
-    const remove = event.target.closest("[data-dir]");
-    if (remove) removeFolder(remove.dataset.dir);
+  /* ---------------------------------------------------------- rail ops -- */
+  el.rail.addEventListener("click", (event) => {
+    const edit = event.target.closest("[data-edit]");
+    if (edit) {
+      event.stopPropagation();
+      const row = edit.closest(".rail-item");
+      const entry = collectionById(edit.dataset.edit);
+      if (row && entry) startCollectionRename(row, entry);
+      return;
+    }
+    const remove = event.target.closest("[data-del]");
+    if (remove) {
+      event.stopPropagation();
+      deleteCollection(remove.dataset.del);
+      return;
+    }
+    const row = event.target.closest(".rail-item[data-filter]");
+    if (row) {
+      state.filter = row.dataset.filter;
+      closeCollect();
+      renderRail();
+      render();
+    }
   });
 
+  el.rail.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest(".rail-item[data-filter]");
+    if (!row) return;
+    event.preventDefault();
+    state.filter = row.dataset.filter;
+    renderRail();
+    render();
+  });
+
+  el.railNew.addEventListener("click", startRailNew);
+
+  el.pop.addEventListener("change", (event) => {
+    if (event.target.matches("input[data-cid]")) applyCollect();
+  });
+
+  el.popForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = el.popName.value.trim();
+    if (!name) return;
+    const item = state.items.find((entry) => entry.id === state.collectId);
+    try {
+      const entry = await createCollection(name);
+      el.popName.value = "";
+      if (item && entry) {
+        const ids = [...(item.collections || []), entry.id];
+        const data = await api("/api/collections/assign", {
+          method: "POST",
+          body: { item: item.id, collections: ids },
+        });
+        state.collections = data.collections || state.collections;
+        item.collections = ids;
+      }
+      render();
+      renderCollectList();
+      toast(`已归入新合集「${entry ? entry.name : name}」`, "good");
+    } catch (error) {
+      toast(error.message, "bad");
+    }
+  });
+
+  document.addEventListener("mousedown", (event) => {
+    if (el.pop.hidden) return;
+    if (event.target.closest("#collect-pop")) return;
+    if (event.target.closest('[data-act="collect"]')) return;
+    closeCollect();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeCollect();
+  });
+
+  /* ------------------------------------------------------- search/sort -- */
   el.search.addEventListener("input", () => {
     clearTimeout(state.timer);
     state.timer = setTimeout(() => {
@@ -294,6 +668,11 @@
   el.sort.addEventListener("change", () => {
     state.sort = el.sort.value;
     load();
+  });
+
+  el.dirs.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-dir]");
+    if (remove) removeFolder(remove.dataset.dir);
   });
 
   el.addDir.addEventListener("click", addFolder);

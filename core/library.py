@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from pathlib import Path
 
 from . import annotations, config, pdfinfo
@@ -31,22 +32,157 @@ _PAGE_CACHE: dict[tuple[str, float], int | None] = {}
 
 
 # --------------------------------------------------------------------------- #
-# Watched folders
+# Watched folders and paper collections
 # --------------------------------------------------------------------------- #
-def _load_extra_dirs() -> list[str]:
+def _load_data() -> dict:
+    """The library's own JSON: extra watched folders and paper collections."""
     try:
         data = json.loads(LIBRARY_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
-    dirs = data.get("dirs") if isinstance(data, dict) else None
-    return [item for item in (dirs or []) if isinstance(item, str)]
+        return {"dirs": [], "collections": []}
+    if not isinstance(data, dict):
+        return {"dirs": [], "collections": []}
+    dirs = [item for item in (data.get("dirs") or []) if isinstance(item, str)]
+    collections = []
+    for entry in data.get("collections") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        collections.append(
+            {
+                "id": str(entry.get("id") or _collection_id(name)),
+                "name": name,
+                "items": [str(item) for item in (entry.get("items") or []) if isinstance(item, str)],
+                "created": float(entry.get("created") or 0) or time.time(),
+            }
+        )
+    return {"dirs": dirs, "collections": collections}
+
+
+def _save_data(data: dict) -> None:
+    config.APP_DIR.mkdir(parents=True, exist_ok=True)
+    LIBRARY_FILE.write_text(
+        json.dumps(
+            {
+                "dirs": data.get("dirs") or [],
+                "collections": data.get("collections") or [],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _load_extra_dirs() -> list[str]:
+    return _load_data()["dirs"]
 
 
 def _save_extra_dirs(dirs: list[str]) -> None:
-    config.APP_DIR.mkdir(parents=True, exist_ok=True)
-    LIBRARY_FILE.write_text(
-        json.dumps({"dirs": dirs}, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    data = _load_data()
+    data["dirs"] = dirs
+    _save_data(data)
+
+
+def _collection_id(name: str) -> str:
+    return hashlib.sha1(f"collection|{name}|{time.time()}".encode("utf-8")).hexdigest()[:10]
+
+
+def _check_collection_name(raw: str, collections: list[dict], skip_id: str = "") -> str:
+    name = (raw or "").strip()
+    if not name:
+        raise ValueError("合集名称不能为空")
+    if len(name) > 40:
+        raise ValueError("合集名称最多 40 个字符")
+    if any(char in name for char in BAD_NAME_CHARS):
+        raise ValueError('合集名称不能包含 \\ / : * ? " < > |')
+    lowered = name.lower()
+    if any(entry["name"].lower() == lowered and entry["id"] != skip_id for entry in collections):
+        raise ValueError(f"已经有叫「{name}」的合集了")
+    return name
+
+
+def collections() -> list[dict]:
+    """User defined groups of papers, in creation order."""
+    items = _load_data()["collections"]
+    return sorted(items, key=lambda entry: entry.get("created") or 0)
+
+
+def create_collection(name: str) -> dict:
+    data = _load_data()
+    label = _check_collection_name(name, data["collections"])
+    entry = {
+        "id": _collection_id(label),
+        "name": label,
+        "items": [],
+        "created": time.time(),
+    }
+    data["collections"].append(entry)
+    _save_data(data)
+    return entry
+
+
+def rename_collection(collection_id: str, name: str) -> dict:
+    data = _load_data()
+    entry = next((item for item in data["collections"] if item["id"] == collection_id), None)
+    if entry is None:
+        raise FileNotFoundError("合集不存在")
+    entry["name"] = _check_collection_name(name, data["collections"], entry["id"])
+    _save_data(data)
+    return entry
+
+
+def delete_collection(collection_id: str) -> bool:
+    data = _load_data()
+    kept = [item for item in data["collections"] if item["id"] != collection_id]
+    if len(kept) == len(data["collections"]):
+        raise FileNotFoundError("合集不存在")
+    data["collections"] = kept
+    _save_data(data)
+    return True
+
+
+def assign_collections(item_id: str, collection_ids: list[str]) -> list[dict]:
+    """Put a paper into exactly the given collections (removed from the rest)."""
+    data = _load_data()
+    known = {entry["id"] for entry in data["collections"]}
+    wanted = {cid for cid in collection_ids if cid in known}
+    for entry in data["collections"]:
+        members = entry["items"]
+        if entry["id"] in wanted:
+            if item_id not in members:
+                members.append(item_id)
+        elif item_id in members:
+            entry["items"] = [value for value in members if value != item_id]
+    _save_data(data)
+    return data["collections"]
+
+
+def _remap_collection_ids(old_id: str, new_id: str) -> None:
+    """Keep a paper's collections after it is renamed (its id changes)."""
+    if not old_id or old_id == new_id:
+        return
+    data = _load_data()
+    changed = False
+    for entry in data["collections"]:
+        if old_id in entry["items"]:
+            entry["items"] = [new_id if value == old_id else value for value in entry["items"]]
+            changed = True
+    if changed:
+        _save_data(data)
+
+
+def _drop_collection_items(item_id: str) -> None:
+    data = _load_data()
+    changed = False
+    for entry in data["collections"]:
+        if item_id in entry["items"]:
+            entry["items"] = [value for value in entry["items"] if value != item_id]
+            changed = True
+    if changed:
+        _save_data(data)
 
 
 def watched_dirs() -> list[str]:
@@ -174,6 +310,10 @@ def scan() -> list[dict]:
                 }
             )
     result: list[dict] = []
+    membership: dict[str, list[str]] = {}
+    for entry in collections():
+        for item_id in entry["items"]:
+            membership.setdefault(item_id, []).append(entry["id"])
     for item in items.values():
         item["files"].sort(key=_sort_key)
         item["updated"] = max((file["mtime"] for file in item["files"]), default=0.0)
@@ -186,6 +326,7 @@ def scan() -> list[dict]:
             for file in item["files"]
             if file["name"].lower().endswith(".pdf")
         )
+        item["collections"] = membership.get(item["id"], [])
         result.append(item)
     result.sort(key=lambda entry: entry["updated"], reverse=True)
     return result
@@ -243,6 +384,11 @@ def rename(folder: str | Path, base: str, new_base: str) -> dict:
     for source, destination in plans:
         if source.suffix.lower() == ".pdf":
             annotations.migrate(source, destination)
+    try:
+        folder_key = str(target_dir.resolve())
+    except OSError:
+        folder_key = str(target_dir)
+    _remap_collection_ids(_item_id(folder_key, base), _item_id(folder_key, new_name))
     return {"base": base, "dir": str(target_dir), "name": new_name, "renamed": len(plans)}
 
 
@@ -296,6 +442,11 @@ def delete(folder: str | Path, base: str) -> dict:
         if path.suffix.lower() == ".pdf":
             annotations.forget(path)
         removed += 1
+    try:
+        folder_key = str(target_dir.resolve())
+    except OSError:
+        folder_key = str(target_dir)
+    _drop_collection_items(_item_id(folder_key, base))
     return {"base": base, "dir": str(target_dir), "removed": removed}
 
 

@@ -10,6 +10,9 @@ venv/
 .tmp/
 *.log
 
+# Local paper collection (user data, hundreds of MB — never commit)
+papers/
+
 # OS
 Thumbs.db
 desktop.ini
