@@ -67,6 +67,8 @@
 
 ![术语库与预设](docs/screenshots/glossary.png)
 
+> 演示截图使用公开论文 **GPT-4 Technical Report**（arXiv:2303.08774）作为示例，不包含任何用户个人文档；译文由内置 Google 免费引擎生成，仅用于展示排版、阅读与批注功能。
+
 ## 功能指南
 
 ### 1. 翻译 PDF：保留正文、公式与图表
