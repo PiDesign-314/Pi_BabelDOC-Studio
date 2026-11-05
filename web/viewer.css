@@ -1126,6 +1126,7 @@ body.side-dragging, body.side-dragging * { cursor: col-resize !important; user-s
   position: absolute;
   left: 18px;
   right: 0;
+  z-index: 1;
   min-height: 52px;
   display: flex;
   flex-direction: column;
@@ -1147,25 +1148,26 @@ body.side-dragging, body.side-dragging * { cursor: col-resize !important; user-s
   transition: transform 0.14s ease, box-shadow 0.14s ease;
 }
 .r-mcard:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(17, 17, 26, 0.14); }
-.r-mcard::before {
-  content: "";
+
+/* Leader line from the annotated sentence to its margin card. */
+.r-mlink {
   position: absolute;
-  right: 100%;
-  top: 17px;
-  width: 18px;
-  height: 1px;
-  background: var(--line-strong);
+  z-index: 0;
+  overflow: visible;
+  pointer-events: none;
 }
-.r-mcard::after {
-  content: "";
-  position: absolute;
-  right: calc(100% + 16px);
-  top: 14px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--mc, var(--accent));
+.r-mlink path {
+  fill: none;
+  stroke-width: 1.2;
+  stroke-opacity: 0.55;
+  stroke-linecap: round;
+  transition: stroke-opacity 0.16s ease, stroke-width 0.16s ease;
 }
+.r-mlink circle {
+  stroke: var(--card);
+  stroke-width: 1.2;
+}
+.r-mlink.on path { stroke-opacity: 0.95; stroke-width: 1.8; }
 .r-mcard-top { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-3); }
 .r-mcard-quote {
   margin: 0;

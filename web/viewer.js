@@ -3049,6 +3049,26 @@
     return (item.point && item.point.y) || 0;
   }
 
+  /* Where the connector should touch the page: the end of the highlighted
+     sentence for a highlight, the marker / text origin for the rest. */
+  function itemAnchor(item, sheet) {
+    if (item.type === "highlight") {
+      const bands = bandsFor(item, sheet);
+      if (bands && bands.length) {
+        const band = bands[0];
+        return { x: band.x + band.w, y: band.y + band.h / 2 };
+      }
+    }
+    const point = item.point || { x: 0, y: 0 };
+    if (item.type === "text") {
+      /* Start after the text, not on top of its first glyph. */
+      const node = textNode(item.id);
+      const width = node ? node.offsetWidth / state.scale : 0;
+      return { x: point.x + width, y: point.y + (item.fontSize || 18) * 0.55 };
+    }
+    return { x: point.x, y: point.y };
+  }
+
   function renderMarginCards(sheet) {
     let layer = sheet.el.querySelector(":scope > .r-margin");
     if (!state.marginMode) {
@@ -3065,6 +3085,8 @@
     );
     layer.replaceChildren();
     if (!items.length) return;
+    const scale = state.scale;
+    const pageWidth = sheet.width;
     const sorted = items.slice().sort((a, b) => itemAnchorY(a, sheet) - itemAnchorY(b, sheet));
     let bottom = -Infinity;
     for (const item of sorted) {
@@ -3073,7 +3095,7 @@
       card.className = "r-mcard";
       card.dataset.id = item.id;
       card.style.setProperty("--mc", COLOR_HEX[item.color] || COLOR_HEX.yellow);
-      const top = Math.max(itemAnchorY(item, sheet) * state.scale - 10, bottom + 8, 2);
+      const top = Math.max(itemAnchorY(item, sheet) * scale - 10, bottom + 8, 2);
       card.style.top = `${top}px`;
       const kindLabel = { highlight: "高亮", note: "便签", text: "文字", ink: "画笔" }[item.type] || "批注";
       const styleLabel =
@@ -3088,6 +3110,43 @@
         (item.comment ? `<p class="r-mcard-note">${escapeHtml(item.comment.slice(0, 260))}</p>` : "");
       card.addEventListener("click", () => focusAnnotation(item.id));
       layer.append(card);
+
+      /* Draw the leader from the sentence to the card.  Cards are stacked to
+         avoid overlap, so the link often runs diagonally — a straight line at
+         the card's own y would point at the wrong row. */
+      const anchor = itemAnchor(item, sheet);
+      const x1 = anchor.x * scale;
+      const y1 = anchor.y * scale;
+      const x2 = pageWidth + 18;
+      const y2 = top + 17;
+      const boxLeft = Math.min(x1, x2);
+      const boxTop = Math.min(y1, y2);
+      const width = Math.max(2, Math.abs(x2 - x1));
+      const height = Math.max(2, Math.abs(y2 - y1));
+      const link = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      link.classList.add("r-mlink");
+      link.setAttribute("width", String(width));
+      link.setAttribute("height", String(height));
+      link.style.left = `${boxLeft - pageWidth}px`;
+      link.style.top = `${boxTop}px`;
+      const bend = Math.max(16, Math.min(64, width * 0.45));
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute(
+        "d",
+        `M0 ${y1 - boxTop} C ${bend} ${y1 - boxTop}, ${width - bend} ${y2 - boxTop}, ${width} ${y2 - boxTop}`
+      );
+      path.setAttribute("stroke", COLOR_HEX[item.color] || COLOR_HEX.yellow);
+      link.append(path);
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("cx", "0");
+      dot.setAttribute("cy", String(y1 - boxTop));
+      dot.setAttribute("r", "2.8");
+      dot.setAttribute("fill", COLOR_HEX[item.color] || COLOR_HEX.yellow);
+      link.append(dot);
+      layer.append(link);
+      card.addEventListener("pointerenter", () => link.classList.add("on"));
+      card.addEventListener("pointerleave", () => link.classList.remove("on"));
+
       bottom = top + card.offsetHeight + 6;
     }
   }
