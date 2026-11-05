@@ -140,6 +140,10 @@ def build_command(cfg: dict, files: list[str], exe: str, pages: str | None = Non
     ]
     if cfg.get("api_key"):
         cmd += ["--openai-api-key", cfg["api_key"]]
+    if cfg.get("google_free"):
+        # The free Google endpoint has no LLM, so skip term extraction and
+        # rich-text prompts that would need an instruction-following model.
+        cmd += ["--no-auto-extract-glossary", "--disable-rich-text-translate"]
     if cfg.get("term_model_enabled") and cfg.get("term_model"):
         cmd += ["--openai-term-extraction-model", cfg["term_model"]]
 
@@ -708,6 +712,10 @@ class JobManager:
         env["COLUMNS"] = env.get("COLUMNS") or "200"
         env["NO_COLOR"] = "1"
         env["TERM"] = "dumb"
+        # BabelDOC may call the local Google-translate shim; never let a system
+        # proxy intercept 127.0.0.1.
+        env["NO_PROXY"] = "127.0.0.1,localhost"
+        env["no_proxy"] = "127.0.0.1,localhost"
 
         failed_code: int | None = None
         for run in job.runs:

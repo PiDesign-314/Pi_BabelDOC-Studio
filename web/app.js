@@ -95,6 +95,15 @@
     btnGlossaryClose: $("#btn-glossary-close"),
     btnGlossarySave: $("#btn-glossary-save"),
     glossaryImport: $("#glossary-import"),
+    openSettings: $("#open-settings"),
+    settingsModal: $("#settings-modal"),
+    settingsClose: $("#settings-close"),
+    settingsCancel: $("#settings-cancel"),
+    settingsDone: $("#settings-done"),
+    summaryProvider: $("#summary-provider"),
+    summaryLang: $("#summary-lang"),
+    summaryDual: $("#summary-dual"),
+    summaryGlossary: $("#summary-glossary"),
   };
 
   /* ------------------------------------------------------------- theme -- */
@@ -426,10 +435,12 @@
     el.baseUrl.value = providerState.base_url || preset.base_url || "";
     el.model.value = providerState.model || (preset.models && preset.models[0]) || "";
     el.apiKey.value = providerState.api_key || "";
+    syncProviderFields(providerId);
 
     const ids = settings.glossary_ids || [];
     el.glossary.value = ids.length ? ids[0] : "";
     renderPageModeOptions();
+    updateSettingsSummary();
   }
 
   function collectSettings() {
@@ -470,6 +481,48 @@
     };
   }
 
+  function optionLabel(select) {
+    const option = select.options[select.selectedIndex];
+    return option ? option.textContent.trim() : "";
+  }
+
+  function updateSettingsSummary() {
+    if (!el.summaryProvider) return;
+    const provider = optionLabel(el.provider) || "—";
+    const model = el.model.value.trim();
+    el.summaryProvider.textContent = model ? `${provider} · ${model}` : provider;
+    el.summaryLang.textContent = `${optionLabel(el.langIn) || "—"} → ${optionLabel(el.langOut) || "—"}`;
+    el.summaryDual.textContent = optionLabel(el.dualMode) || "—";
+    el.summaryGlossary.textContent = el.glossary.value ? optionLabel(el.glossary) : "不使用术语库";
+  }
+
+  function syncProviderFields(providerId) {
+    const free = providerId === "google_free";
+    el.baseUrl.disabled = free;
+    el.apiKey.disabled = free;
+    el.model.disabled = free;
+    el.baseUrl.placeholder = free ? "内置免费接口，无需填写" : "https://…/v1";
+    el.apiKey.placeholder = free ? "无需 API Key" : "sk-…";
+    if (free) {
+      el.baseUrl.value = "";
+      el.apiKey.value = "";
+      el.model.value = "google-translate";
+    }
+  }
+
+  function openSettingsSheet() {
+    updateSettingsSummary();
+    el.settingsModal.hidden = false;
+    document.body.classList.add("settings-open");
+    el.settingsClose.focus();
+  }
+
+  function closeSettingsSheet() {
+    el.settingsModal.hidden = true;
+    document.body.classList.remove("settings-open");
+    updateSettingsSummary();
+  }
+
   function scheduleSave() {
     clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(async () => {
@@ -493,6 +546,8 @@
     el.model.value = (saved && saved.model) || (preset.models[0] || "");
     el.apiKey.value = (saved && saved.api_key) || "";
     el.rememberKey.checked = Boolean(saved && saved.remember);
+    syncProviderFields(providerId);
+    updateSettingsSummary();
     scheduleSave();
   }
 
@@ -863,7 +918,7 @@
       el.advanced.hidden = false;
       return;
     }
-    if (!el.apiKey.value.trim()) {
+    if (!el.apiKey.value.trim() && !["google_free", "ollama"].includes(el.provider.value)) {
       toast("请填写 API Key", "bad");
       el.advanced.hidden = false;
       el.apiKey.focus();
@@ -1139,6 +1194,24 @@
     bindDropTarget();
 
     el.provider.addEventListener("change", switchProvider);
+    if (el.openSettings) el.openSettings.addEventListener("click", openSettingsSheet);
+    for (const node of [el.settingsClose, el.settingsCancel, el.settingsDone]) {
+      if (node) node.addEventListener("click", closeSettingsSheet);
+    }
+    if (el.settingsModal) {
+      const backdrop = el.settingsModal.querySelector("[data-settings-close]");
+      if (backdrop) backdrop.addEventListener("click", closeSettingsSheet);
+    }
+    for (const control of [el.provider, el.langOut, el.langIn, el.dualMode, el.glossary]) {
+      control.addEventListener("change", updateSettingsSummary);
+    }
+    el.model.addEventListener("input", updateSettingsSummary);
+    el.model.addEventListener("change", updateSettingsSummary);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && el.settingsModal && !el.settingsModal.hidden) {
+        closeSettingsSheet();
+      }
+    });
     el.model.addEventListener("change", scheduleSave);
     el.model.addEventListener("input", scheduleSave);
     el.baseUrl.addEventListener("input", scheduleSave);

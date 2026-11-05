@@ -125,7 +125,131 @@
       </section>
 
       <section class="group" aria-labelledby="work-settings-title">
-        <h2 class="group-title" id="work-settings-title">翻译设置</h2>
+        <div class="group-head">
+          <h2 class="group-title" id="work-settings-title">翻译设置</h2>
+          <button class="inline-action" id="open-settings" type="button">修改</button>
+        </div>
+        <div class="group-card settings-summary">
+          <div class="summary-row"><span>服务与模型</span><strong id="summary-provider">—</strong></div>
+          <div class="summary-row"><span>语言</span><strong id="summary-lang">—</strong></div>
+          <div class="summary-row"><span>版式</span><strong id="summary-dual">—</strong></div>
+          <div class="summary-row"><span>术语库</span><strong id="summary-glossary">—</strong></div>
+        </div>
+      </section>
+
+      <section class="group" aria-labelledby="work-output-title">
+        <h2 class="group-title" id="work-output-title">输出</h2>
+        <div class="group-card">
+          <div class="rows">
+            <div class="row">
+              <label for="output-dir">输出目录</label>
+              <div class="select-wrap">
+                <input id="output-dir" spellcheck="false" autocomplete="off">
+                <button class="inline-action" id="btn-output" type="button">浏览</button>
+              </div>
+            </div>
+            <div class="row">
+              <label for="watermark">水印</label>
+              <div class="select-wrap">
+                <select id="watermark">
+                  <option value="no_watermark">不加水印</option>
+                  <option value="watermarked">加水印</option>
+                  <option value="both">两种都生成</option>
+                </select>
+              </div>
+            </div>
+            <div class="row toggle-row">
+              <div class="row-text">
+                <label class="row-label" for="open-when-done">完成后打开输出目录</label>
+                <p class="hint">翻译结束后直接定位到产物文件夹</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="open-when-done" checked>
+                <span class="track"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <p class="group-foot">每篇论文的译文、双语稿与术语表会归入同一个子文件夹。</p>
+      </section>
+
+      <section class="group">
+        <div class="group-card action-card">
+          <div class="action-summary-row">
+            <span class="summary" id="summary">还没有添加文件</span>
+          </div>
+
+          <div class="progress-block" id="progress-block" hidden>
+            <div class="job-card" id="job-card" data-state="running">
+              <div class="job-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+                     stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+                  <path d="M6.2 2.8h7.2L18 7.4V20a1.2 1.2 0 0 1-1.2 1.2H6.2A1.2 1.2 0 0 1 5 20V4a1.2 1.2 0 0 1 1.2-1.2Z"/>
+                  <path d="M13.2 3v4.6h4.6"/>
+                  <path d="M8.4 12.6h6.2M8.4 15.8h4.2"/>
+                </svg>
+              </div>
+              <div class="job-main">
+                <strong class="job-name" id="job-name">准备中…</strong>
+                <span class="job-meta" id="job-meta"></span>
+              </div>
+              <div class="job-side">
+                <strong class="job-percent" id="percent">0%</strong>
+                <span class="job-note" id="job-note"></span>
+              </div>
+              <div class="progress-track" aria-hidden="true">
+                <div class="progress-fill" id="progress-fill"></div>
+              </div>
+            </div>
+            <div class="job-foot">
+              <span class="job-stage" id="stage">准备中</span>
+              <button class="log-toggle" id="btn-log" type="button" aria-expanded="false">
+                运行日志 <span class="chev">›</span>
+              </button>
+            </div>
+            <pre class="log" id="log" hidden></pre>
+          </div>
+
+          <div class="action-buttons">
+            <button class="btn btn-secondary" id="btn-cancel" type="button" hidden>取消</button>
+            <button class="btn btn-primary btn-block" id="btn-start" type="button" disabled>
+              开始翻译
+            </button>
+          </div>
+          <div class="usage-line" id="usage-line" hidden></div>
+        </div>
+      </section>
+
+      <section class="group result-card" id="result-card" hidden>
+        <h2 class="group-title">翻译结果</h2>
+        <div class="group-card">
+          <div class="result-list" id="result-list"></div>
+          <a class="row-link" href="/library">在结果库中查看全部</a>
+        </div>
+      </section>
+    </div>
+
+  </main>
+
+  <footer class="foot">
+    <span>由 <a href="https://github.com/funstory-ai/BabelDOC" target="_blank" rel="noreferrer">BabelDOC</a> 驱动</span>
+    <span class="dot-sep">·</span>
+    <span id="engine-path">本机运行，数据不出内网</span>
+    <button class="linkish" id="btn-quit" type="button">退出应用</button>
+  </footer>
+</div>
+
+<!-- ------------------------------------------------------------- glossary -->
+<div class="settings-sheet" id="settings-modal" hidden>
+  <div class="settings-backdrop" data-settings-close></div>
+  <div class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <header class="settings-head">
+      <h2 id="settings-title">翻译设置</h2>
+      <button class="settings-x" id="settings-close" type="button" aria-label="关闭">✕</button>
+    </header>
+    <div class="settings-body">
+<section class="group" aria-labelledby="work-settings-title">
+        
         <div class="group-card">
 
           <p class="subhead">语言</p>
@@ -326,110 +450,14 @@
         </div>
         <p class="group-foot">修改会自动保存，下次打开继续沿用。</p>
       </section>
-
-      <section class="group" aria-labelledby="work-output-title">
-        <h2 class="group-title" id="work-output-title">输出</h2>
-        <div class="group-card">
-          <div class="rows">
-            <div class="row">
-              <label for="output-dir">输出目录</label>
-              <div class="select-wrap">
-                <input id="output-dir" spellcheck="false" autocomplete="off">
-                <button class="inline-action" id="btn-output" type="button">浏览</button>
-              </div>
-            </div>
-            <div class="row">
-              <label for="watermark">水印</label>
-              <div class="select-wrap">
-                <select id="watermark">
-                  <option value="no_watermark">不加水印</option>
-                  <option value="watermarked">加水印</option>
-                  <option value="both">两种都生成</option>
-                </select>
-              </div>
-            </div>
-            <div class="row toggle-row">
-              <div class="row-text">
-                <label class="row-label" for="open-when-done">完成后打开输出目录</label>
-                <p class="hint">翻译结束后直接定位到产物文件夹</p>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="open-when-done" checked>
-                <span class="track"></span>
-              </label>
-            </div>
-          </div>
-        </div>
-        <p class="group-foot">每篇论文的译文、双语稿与术语表会归入同一个子文件夹。</p>
-      </section>
-
-      <section class="group">
-        <div class="group-card action-card">
-          <div class="action-summary-row">
-            <span class="summary" id="summary">还没有添加文件</span>
-          </div>
-
-          <div class="progress-block" id="progress-block" hidden>
-            <div class="job-card" id="job-card" data-state="running">
-              <div class="job-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
-                     stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
-                  <path d="M6.2 2.8h7.2L18 7.4V20a1.2 1.2 0 0 1-1.2 1.2H6.2A1.2 1.2 0 0 1 5 20V4a1.2 1.2 0 0 1 1.2-1.2Z"/>
-                  <path d="M13.2 3v4.6h4.6"/>
-                  <path d="M8.4 12.6h6.2M8.4 15.8h4.2"/>
-                </svg>
-              </div>
-              <div class="job-main">
-                <strong class="job-name" id="job-name">准备中…</strong>
-                <span class="job-meta" id="job-meta"></span>
-              </div>
-              <div class="job-side">
-                <strong class="job-percent" id="percent">0%</strong>
-                <span class="job-note" id="job-note"></span>
-              </div>
-              <div class="progress-track" aria-hidden="true">
-                <div class="progress-fill" id="progress-fill"></div>
-              </div>
-            </div>
-            <div class="job-foot">
-              <span class="job-stage" id="stage">准备中</span>
-              <button class="log-toggle" id="btn-log" type="button" aria-expanded="false">
-                运行日志 <span class="chev">›</span>
-              </button>
-            </div>
-            <pre class="log" id="log" hidden></pre>
-          </div>
-
-          <div class="action-buttons">
-            <button class="btn btn-secondary" id="btn-cancel" type="button" hidden>取消</button>
-            <button class="btn btn-primary btn-block" id="btn-start" type="button" disabled>
-              开始翻译
-            </button>
-          </div>
-          <div class="usage-line" id="usage-line" hidden></div>
-        </div>
-      </section>
-
-      <section class="group result-card" id="result-card" hidden>
-        <h2 class="group-title">翻译结果</h2>
-        <div class="group-card">
-          <div class="result-list" id="result-list"></div>
-          <a class="row-link" href="/library">在结果库中查看全部</a>
-        </div>
-      </section>
     </div>
-
-  </main>
-
-  <footer class="foot">
-    <span>由 <a href="https://github.com/funstory-ai/BabelDOC" target="_blank" rel="noreferrer">BabelDOC</a> 驱动</span>
-    <span class="dot-sep">·</span>
-    <span id="engine-path">本机运行，数据不出内网</span>
-    <button class="linkish" id="btn-quit" type="button">退出应用</button>
-  </footer>
+    <footer class="settings-foot">
+      <button class="btn btn-secondary" id="settings-cancel" type="button">关闭</button>
+      <button class="btn btn-primary" id="settings-done" type="button">完成</button>
+    </footer>
+  </div>
 </div>
 
-<!-- ------------------------------------------------------------- glossary -->
 <div class="modal-backdrop" id="glossary-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="glossary-title">
     <div class="modal-head">

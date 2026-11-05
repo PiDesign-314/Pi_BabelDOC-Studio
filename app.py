@@ -1,4 +1,4 @@
-"""BabelDOC Studio — local web app with an iOS-style interface.
+"""BabelDOC Studio — local web app with an Apple HIG-style interface.
 
 Run ``python app.py`` to start the server and open the app window (Microsoft
 Edge app mode, Chrome fallback, browser as last resort).
@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import webbrowser
@@ -81,6 +82,146 @@ def _json(data, status: int = 200):
 
 def _error(message: str, status: int = 400):
     return jsonify({"error": message}), status
+
+
+GOOGLE_TRANSLATE_URL = "https://clients5.google.com/translate_a/t"
+GOOGLE_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+GOOGLE_LANG = {
+    "zh": "zh-CN", "zh-cn": "zh-CN", "zh-tw": "zh-TW", "zh-hans": "zh-CN",
+    "zh-hant": "zh-TW", "en": "en", "ja": "ja", "ko": "ko", "fr": "fr",
+    "de": "de", "es": "es", "ru": "ru", "pt": "pt", "it": "it", "ar": "ar",
+    "nl": "nl", "pl": "pl", "tr": "tr", "vi": "vi", "th": "th", "id": "id",
+}
+_google_lock = threading.Lock()
+_google_last = [0.0]
+
+
+def _google_lang(code: str) -> str:
+    return GOOGLE_LANG.get(str(code or "").lower(), str(code or "auto"))
+
+
+def _google_result_text(data) -> str:
+    """The free endpoint replies with either ["text"] or nested segments."""
+    if isinstance(data, str):
+        return data
+    parts: list[str] = []
+    if isinstance(data, list):
+        # With sl=auto the endpoint appends the detected language as a second
+        # string (e.g. ["翻译", "en"]); only the first string is translation.
+        if data and isinstance(data[0], str):
+            return data[0]
+        for item in data:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, list) and item:
+                # [["翻译", "en"]] — keep the translated segment, drop the tag.
+                if isinstance(item[0], str):
+                    parts.append(item[0])
+    return "".join(parts)
+
+
+def _google_translate_chunk(text: str, target: str) -> str:
+    params = urllib.parse.urlencode(
+        {"client": "dict-chrome-ex", "sl": "auto", "tl": target, "q": text}
+    )
+    request_ = urllib.request.Request(
+        GOOGLE_TRANSLATE_URL + "?" + params,
+        headers={"User-Agent": GOOGLE_UA, "Accept": "application/json"},
+    )
+    # Respect the system proxy (the free endpoint is not reachable directly
+    # from mainland China); the local BabelDOC request itself bypasses it via
+    # NO_PROXY set in core.runner.
+    opener = urllib.request.build_opener()
+    with _google_lock:
+        wait = 0.32 - (time.monotonic() - _google_last[0])
+        if wait > 0:
+            time.sleep(wait)
+        _google_last[0] = time.monotonic()
+        with opener.open(request_, timeout=25) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    return _google_result_text(data)
+
+
+def _google_translate(text: str, target: str) -> str:
+    """Translate long paragraphs line by line to stay inside the URL limit."""
+    text = str(text or "")
+    if not text.strip():
+        return ""
+    chunks: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        if current and len(current) + len(line) + 1 > 1500:
+            chunks.append(current)
+            current = line
+        else:
+            current = f"{current}\n{line}" if current else line
+    if current:
+        chunks.append(current)
+    return "\n".join(
+        _google_translate_chunk(chunk, target) if chunk.strip() else chunk
+        for chunk in chunks
+    )
+
+
+def _google_source(prompt: str) -> str | None:
+    """BabelDOC wraps the paragraph in a long LLM prompt; take only the text."""
+    value = str(prompt or "")
+    for marker in ("Now translate the following text:", "Input:\n\n"):
+        index = value.rfind(marker)
+        if index >= 0:
+            return value[index + len(marker):].strip("\n")
+    return None
+
+
+@app.post("/api/google/v1/<lang>/chat/completions")
+def google_chat_completions(lang: str):
+    """OpenAI-compatible shim backed by the free Google Translate endpoint."""
+    if request.remote_addr not in {"127.0.0.1", "::1"}:
+        return _error("仅本机可用", 403)
+    payload = request.get_json(silent=True) or {}
+    content = ""
+    for message in payload.get("messages") or []:
+        if isinstance(message, dict) and message.get("role") == "user":
+            content = str(message.get("content") or "")
+    source = _google_source(content)
+    if source is None:
+        return _error("Google 翻译只支持纯文本段落", 400)
+    try:
+        translated = _google_translate(source, _google_lang(lang))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            return _json(
+                {"error": {"message": "Google 翻译限流，请稍后重试", "type": "rate_limit"}},
+                429,
+            )
+        return _error(f"Google 翻译失败：HTTP {exc.code}", 502)
+    except Exception as exc:
+        return _error(f"Google 翻译失败：{exc}", 502)
+    translated = translated or source
+    created = int(time.time())
+    return _json(
+        {
+            "id": f"chatcmpl-google-{created}",
+            "object": "chat.completion",
+            "created": created,
+            "model": "google-translate",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": translated},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": max(1, len(source) // 4),
+                "completion_tokens": max(1, len(translated) // 4),
+                "total_tokens": max(2, (len(source) + len(translated)) // 4),
+            },
+        }
+    )
 
 
 @app.get("/api/fonts")
@@ -486,9 +627,22 @@ def _normalize_job_payload(payload: dict) -> tuple[dict, list[str]]:
     provider_state = (settings.get("providers") or {}).get(provider_id, {})
     preset = providers.get_preset(provider_id)
 
-    base_url = (payload.get("base_url") or provider_state.get("base_url") or preset["base_url"]).strip()
-    model = (payload.get("model") or provider_state.get("model") or (preset["models"][0] if preset["models"] else "")).strip()
-    api_key = (payload.get("api_key") or provider_state.get("api_key") or "").strip()
+    lang_in = payload.get("lang_in") or "en"
+    lang_out = payload.get("lang_out") or "zh"
+    if provider_id == "google_free":
+        host = request.host or "127.0.0.1:8765"
+        port = host.rsplit(":", 1)[-1] if ":" in host else "8765"
+        if not port.isdigit():
+            port = "8765"
+        base_url = f"http://127.0.0.1:{port}/api/google/v1/{lang_out}"
+        model = "google-translate"
+        api_key = "google-free"
+    else:
+        base_url = (payload.get("base_url") or provider_state.get("base_url") or preset["base_url"]).strip()
+        model = (payload.get("model") or provider_state.get("model") or (preset["models"][0] if preset["models"] else "")).strip()
+        api_key = (payload.get("api_key") or provider_state.get("api_key") or "").strip()
+        if provider_id == "ollama" and not api_key:
+            api_key = "ollama"
 
     files = [str(Path(p)) for p in payload.get("files") or [] if Path(p).exists()]
     glossary_ids = payload.get("glossary_ids") or []
@@ -500,20 +654,20 @@ def _normalize_job_payload(payload: dict) -> tuple[dict, list[str]]:
         "base_url": base_url,
         "model": model,
         "api_key": api_key,
-        "lang_in": payload.get("lang_in") or "en",
-        "lang_out": payload.get("lang_out") or "zh",
+        "lang_in": lang_in,
+        "lang_out": lang_out,
         "page_mode": page_mode,
         "page_range": page_range,
         "dual_mode": payload.get("dual_mode") or "side",
         "glossary_paths": glossary.resolve_paths(glossary_ids),
-        "auto_glossary": bool(payload.get("auto_glossary", True)),
-        "save_glossary": bool(payload.get("save_glossary", True)),
+        "auto_glossary": bool(payload.get("auto_glossary", True)) and provider_id != "google_free",
+        "save_glossary": bool(payload.get("save_glossary", True)) and provider_id != "google_free",
         "skip_references": bool(payload.get("skip_references", True)),
         "reference_page": payload.get("reference_page") or "",
         "output_dir": str(Path(payload.get("output_dir") or config.DEFAULTS["output_dir"])),
         "watermark": payload.get("watermark") or "no_watermark",
         "open_when_done": bool(payload.get("open_when_done", True)),
-        "qps": int(payload.get("qps") or 4),
+        "qps": min(int(payload.get("qps") or 4), 2) if provider_id == "google_free" else int(payload.get("qps") or 4),
         "custom_prompt": payload.get("custom_prompt") or "",
         "price_input": payload.get("price_input") or "",
         "price_output": payload.get("price_output") or "",
@@ -521,7 +675,8 @@ def _normalize_job_payload(payload: dict) -> tuple[dict, list[str]]:
         "skip_scanned": bool(payload.get("skip_scanned", False)),
         "ocr_workaround": bool(payload.get("ocr_workaround", False)),
         "term_model": (payload.get("term_model") or "").strip(),
-        "term_model_enabled": bool(payload.get("term_model_enabled", False)),
+        "term_model_enabled": bool(payload.get("term_model_enabled", False)) and provider_id != "google_free",
+        "google_free": provider_id == "google_free",
     }
     return cfg, files
 
