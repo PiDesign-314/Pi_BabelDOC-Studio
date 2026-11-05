@@ -30,6 +30,9 @@ COLORS = {
 MAX_ITEMS = 4000
 MAX_RECTS = 240
 MAX_RANGES = 32
+# marker/hand/crayon paint a band of colour, underline/pencil/wavy paint a line
+# under the text.  The reader offers all six; PDF export groups them.
+STYLES = {"marker", "crayon", "hand", "underline", "pencil", "wavy"}
 
 
 def document_id(path: str | Path) -> str:
@@ -98,7 +101,7 @@ def _sanitize(items) -> list[dict]:
                 "type": kind,
                 "page": int(_number(item.get("page"), 1, 100000)),
                 "color": color if color in COLORS else "yellow",
-                "style": item.get("style") if item.get("style") in {"marker", "underline", "pencil"} else "marker",
+                "style": item.get("style") if item.get("style") in STYLES else "marker",
                 "inkColor": item.get("inkColor") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(item.get("inkColor", ""))) else "#30343b",
                 "opacity": _number(item.get("opacity", 1), 0.05, 1),
                 "width": _number(item.get("width", 2), 0.5, 30),

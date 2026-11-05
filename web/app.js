@@ -75,6 +75,7 @@
     jobNote: $("#job-note"),
     stage: $("#stage"),
     percent: $("#percent"),
+    progressFill: $("#progress-fill"),
     btnLog: $("#btn-log"),
     log: $("#log"),
     summary: $("#summary"),
@@ -318,7 +319,7 @@
             <div class="file-name" title="${escapeHtml(file.path)}">${escapeHtml(file.name)}</div>
             <div class="file-meta">${file.pages ? `${file.pages} 页` : "页数未知"} · ${formatSize(file.size)}</div>
           </div>
-          <button class="file-remove" type="button" title="移除">✕</button>
+          <button class="file-remove" type="button" title="移除" aria-label="移除 ${escapeHtml(file.name)}">✕</button>
         </div>`
       )
       .join("");
@@ -712,6 +713,7 @@
     const progress = Number(job.progress) || 0;
     el.stage.textContent = job.stage || "运行中";
     el.percent.textContent = `${Math.round(progress)}%`;
+    if (el.progressFill) el.progressFill.style.width = `${Math.max(0, Math.min(100, progress))}%`;
     el.jobCard.dataset.state =
       job.status === "succeeded"
         ? "done"
@@ -882,6 +884,7 @@
       el.usageLine.hidden = true;
       el.resultCard.hidden = true;
       el.jobCard.dataset.state = "running";
+      if (el.progressFill) el.progressFill.style.width = "0%";
       el.progressBlock.hidden = false;
       setRunning(true);
       poll();

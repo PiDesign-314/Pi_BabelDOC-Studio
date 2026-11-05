@@ -147,7 +147,11 @@ def export(
                     if not rects:
                         skipped += 1
                         continue
-                    factory = page.add_highlight_annot if item.get("style", "marker") == "marker" else page.add_underline_annot
+                    factory = (
+                        page.add_highlight_annot
+                        if item.get("style", "marker") in {"marker", "crayon", "hand"}
+                        else page.add_underline_annot
+                    )
                     annot = factory(quads=rects)
                     highlights += 1
                 elif kind == "ink":

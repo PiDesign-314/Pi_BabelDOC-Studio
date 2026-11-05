@@ -30,6 +30,7 @@ sys.path.insert(0, str(BASE_DIR))
 from core import (  # noqa: E402
     annotations,
     config,
+    fonts,
     glossary,
     library,
     pdfexport,
@@ -41,6 +42,26 @@ from core import (  # noqa: E402
 from core.languages import LANGUAGES  # noqa: E402
 
 WEB_DIR = BASE_DIR / "web"
+
+APP_VERSION = "1.4.0"
+# The reader checks these before trusting the server with the newer annotation
+# types; a stale process keeps an old API alive and silently drops them.
+API_FEATURES = ("text", "ink", "styles", "fonts", "margin-notes")
+
+
+def _build_id() -> int:
+    """Newest source mtime — lets the UI tell a stale server from a fresh one."""
+    latest = 0.0
+    for pattern in ("app.py", "core/*.py", "web/*.js", "web/*.css", "web/*.html"):
+        for path in BASE_DIR.glob(pattern):
+            try:
+                latest = max(latest, path.stat().st_mtime)
+            except OSError:
+                continue
+    return int(latest)
+
+
+BUILD_ID = _build_id()
 
 app = Flask(__name__, static_folder=str(WEB_DIR), static_url_path="/assets")
 try:
@@ -64,20 +85,34 @@ def _error(message: str, status: int = 400):
 
 @app.get("/api/fonts")
 def local_fonts():
-    """Enumerate installed font families without exposing local file paths."""
-    names = set()
-    if sys.platform == "win32":
-        import winreg
-        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-            try:
-                with winreg.OpenKey(hive, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts") as key:
-                    for index in range(winreg.QueryInfoKey(key)[1]):
-                        name = winreg.EnumValue(key, index)[0]
-                        name = name.split(" (")[0]
-                        names.update(part.strip() for part in name.split(" & ") if part.strip())
-            except OSError:
-                pass
-    return jsonify({"fonts": sorted(names, key=str.casefold)})
+    """Fonts the reader can use for page text: installed, imported, bundled."""
+    return jsonify({"fonts": fonts.public_fonts(), "count": len(fonts.registry())})
+
+
+@app.get("/api/font-file/<font_id>")
+def font_file(font_id):
+    """Serve a font file by id so the page can @font-face it without paths."""
+    found = fonts.font_file(font_id)
+    if not found:
+        return _error("字体不可用", 404)
+    path, mimetype = found
+    response = send_file(path, mimetype=mimetype, conditional=True, max_age=86400)
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
+@app.post("/api/fonts/upload")
+def upload_font():
+    """Import a .ttf/.otf/.ttc the user picked; it stays on this machine."""
+    upload = request.files.get("file")
+    if not upload:
+        return _error("没有选择字体文件")
+    data = upload.read(fonts.MAX_BYTES + 1)
+    try:
+        entry = fonts.import_bytes(upload.filename or "font.ttf", data, request.form.get("label", ""))
+    except ValueError as exc:
+        return _error(str(exc))
+    return _json({"font": entry})
 
 
 @app.after_request
@@ -197,7 +232,15 @@ def viewer_page():
 
 @app.get("/api/health")
 def health():
-    return _json({"ok": True, "app": "BabelDOC Studio"})
+    return _json(
+        {
+            "ok": True,
+            "app": "BabelDOC Studio",
+            "version": APP_VERSION,
+            "features": list(API_FEATURES),
+            "build": BUILD_ID,
+        }
+    )
 
 
 @app.post("/api/quit")
@@ -207,11 +250,54 @@ def quit_app():
     return _json({"ok": True})
 
 
+@app.post("/api/app/restart")
+def restart_app():
+    """Restart the server in place so the page picks up updated code.
+
+    A stale pythonw process is the one reason a brand-new UI could still lose
+    annotations, and asking the user to find the window and relaunch it by hand
+    is exactly the kind of friction that hides the fix.  The page polls
+    /api/health after calling this and reloads when the new server answers.
+    """
+    if request.remote_addr not in {"127.0.0.1", "::1"}:
+        return _error("仅本机可用", 403)
+    raw_port = request.host.rsplit(":", 1)[-1] if ":" in request.host else "8765"
+    try:
+        port = int(raw_port)
+    except ValueError:
+        port = 8765
+    exe = Path(sys.executable)
+    if exe.name.lower() == "python.exe":
+        windowless = exe.with_name("pythonw.exe")
+        if windowless.exists():
+            exe = windowless
+    script = BASE_DIR / "app.py"
+    # Spawn a tiny waiter: it sleeps while this process closes the socket, then
+    # starts the new server on the same port (no second app window).
+    waiter = (
+        "import subprocess, sys, time\n"
+        "time.sleep(1.6)\n"
+        "subprocess.Popen(sys.argv[2:], cwd=sys.argv[1], close_fds=True)\n"
+    )
+    try:
+        subprocess.Popen(
+            [str(exe), "-c", waiter, str(BASE_DIR), str(exe), str(script), "--server-only", "--port", str(port)],
+            cwd=str(BASE_DIR),
+            close_fds=True,
+        )
+    except OSError as exc:
+        return _error(f"无法重启应用：{exc}", 500)
+    threading.Timer(0.5, lambda: os._exit(0)).start()
+    return _json({"ok": True, "port": port, "version": APP_VERSION})
+
+
 @app.get("/favicon.svg")
 def favicon_svg():
     icon = WEB_DIR / "favicon.svg"
     if icon.exists():
-        return send_from_directory(WEB_DIR, "favicon.svg", mimetype="image/svg+xml")
+        response = send_from_directory(WEB_DIR, "favicon.svg", mimetype="image/svg+xml")
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
     return ("", 204)
 
 
@@ -220,7 +306,9 @@ def favicon():
     """Windows taskbar / app windows want a real icon, not an SVG payload."""
     ico = WEB_DIR / "babeldoc.ico"
     if ico.exists():
-        return send_from_directory(WEB_DIR, "babeldoc.ico", mimetype="image/x-icon")
+        response = send_from_directory(WEB_DIR, "babeldoc.ico", mimetype="image/x-icon")
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
     icon = WEB_DIR / "favicon.svg"
     if icon.exists():
         return send_from_directory(WEB_DIR, "favicon.svg", mimetype="image/svg+xml")
@@ -241,7 +329,7 @@ def bootstrap():
     return _json(
         {
             "app": "BabelDOC Studio",
-            "version": "1.3.0",
+            "version": APP_VERSION,
             "providers": [
                 {
                     "id": item["id"],

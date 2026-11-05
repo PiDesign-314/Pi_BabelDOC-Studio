@@ -43,6 +43,38 @@
 
   bindTheme($("#btn-theme"));
 
+  /* Inline icon set (SF-Symbols-like strokes, drawn locally — no assets). */
+  const ico = {
+    folder:
+      '<svg class="rail-ico" viewBox="0 0 16 16" width="16" height="16" fill="none" ' +
+      'stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M1.9 4.3h4.2l1.2 1.4h6.8v6.4a1.1 1.1 0 0 1-1.1 1.1H3a1.1 1.1 0 0 1-1.1-1.1z"/></svg>',
+    read:
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M2 3.4h3.2c.9 0 1.5.5 1.8 1 .3-.5.9-1 1.8-1H14v9H9c-.8 0-1.4.3-2 .9-.6-.6-1.2-.9-2-.9H2z"/>' +
+      '<path d="M8 4.4v9"/></svg>',
+    collect:
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M2 4.3h4l1.2 1.4h6.6v6a1.2 1.2 0 0 1-1.2 1.2H3.2A1.2 1.2 0 0 1 2 11.7z"/>' +
+      '<path d="M7.9 7.4v4M5.9 9.4h4"/></svg>',
+    reveal:
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M2 4.3h4l1.2 1.4h6.6v6a1.2 1.2 0 0 1-1.2 1.2H3.2A1.2 1.2 0 0 1 2 11.7z"/></svg>',
+    rename:
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M11.4 2.3 13.7 4.6 5.1 13.2H2.8v-2.3z"/><path d="m10 3.7 2.3 2.3"/></svg>',
+    remove:
+      '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M2.8 4.4h10.4M6.4 4.4V3a.9.9 0 0 1 .9-.9h1.4a.9.9 0 0 1 .9.9v1.4"/>' +
+      '<path d="m4.2 4.4.6 8.6a.9.9 0 0 0 .9.8h4.6a.9.9 0 0 0 .9-.8l.6-8.6"/>' +
+      '<path d="M6.7 7v4.2M9.3 7v4.2"/></svg>',
+  };
+
   /* -------------------------------------------------------------- load -- */
   async function load() {
     const params = new URLSearchParams({ q: state.query, sort: state.sort });
@@ -249,7 +281,8 @@
           <span>${escapeHtml(label)}</span>
           ${
             removable
-              ? `<button class="lib-dir-x" type="button" data-dir="${escapeHtml(folder)}" title="不再扫描">✕</button>`
+              ? `<button class="lib-dir-x" type="button" data-dir="${escapeHtml(folder)}"
+                         title="不再扫描" aria-label="不再扫描 ${escapeHtml(label)}">✕</button>`
               : ""
           }
         </span>`;
@@ -264,19 +297,24 @@
     );
     for (const button of $$(".rail-item[data-filter]", el.rail)) {
       const filter = button.dataset.filter;
-      button.classList.toggle("on", filter === state.filter);
+      const on = filter === state.filter;
+      button.classList.toggle("on", on);
+      button.setAttribute("aria-pressed", String(on));
     }
     el.railEmpty.hidden = state.collections.length > 0;
     el.railList.innerHTML = state.collections
       .map((entry) => {
         const count = countIn(entry.id);
         return `<div class="rail-item${entry.id === state.filter ? " on" : ""}"
-                    data-filter="${entry.id}" role="button" tabindex="0">
-          <span class="rail-dot" aria-hidden="true"></span>
+                    data-filter="${entry.id}" role="button" tabindex="0"
+                    aria-pressed="${entry.id === state.filter}">
+          ${ico.folder}
           <span class="rail-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
           <em>${count}</em>
-          <button class="rail-tool" type="button" data-edit="${entry.id}" title="重命名">✎</button>
-          <button class="rail-tool" type="button" data-del="${entry.id}" title="删除合集">✕</button>
+          <button class="rail-tool" type="button" data-edit="${entry.id}"
+                  title="重命名合集" aria-label="重命名合集">✎</button>
+          <button class="rail-tool" type="button" data-del="${entry.id}"
+                  title="删除合集" aria-label="删除合集">✕</button>
         </div>`;
       })
       .join("");
@@ -341,6 +379,7 @@
 
     if (!items.length) {
       el.grid.innerHTML = "";
+      el.grid.hidden = true;
       el.empty.hidden = false;
       const copy = emptyCopy();
       el.emptyTitle.textContent = copy.title;
@@ -350,12 +389,21 @@
     }
 
     el.empty.hidden = true;
+    el.grid.hidden = false;
     el.grid.innerHTML = items
       .map((item, index) => {
         const primary = primaryFile(item);
         const thumb = primary
           ? `/api/library/thumb?w=420&path=${encodeURIComponent(primary.path)}`
           : "";
+        const meta = [
+          formatTime(item.updated),
+          `${item.files.length} 个文件`,
+          formatSize(item.size),
+          item.pages ? `${item.pages} 页` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
         const chips = item.files
           .map((file) => {
             const pdf = file.name.toLowerCase().endsWith(".pdf");
@@ -374,36 +422,40 @@
           .filter(Boolean)
           .map((entry) => `<span class="lib-tag">${escapeHtml(entry.name)}</span>`)
           .join("");
-        const pages = item.pages ? `<span class="lib-pages">${item.pages} 页</span>` : "";
         return `
           <article class="lib-card" data-id="${item.id}" style="--i:${index}">
             <a class="lib-thumb" href="${primary ? readerLink(primary) : "#"}"
-               title="${escapeHtml(item.name)}">
+               title="${escapeHtml(item.name)}" aria-label="阅读 ${escapeHtml(item.name)}">
+              <span class="lib-thumb-label" aria-hidden="true">PDF</span>
               ${
                 thumb
-                  ? `<img loading="lazy" src="${thumb}" alt="" onerror="this.style.visibility='hidden'">`
+                  ? `<img loading="lazy" src="${thumb}" alt="" onerror="this.remove()">`
                   : ""
               }
-              ${pages}
             </a>
             <div class="lib-body">
               <h3 class="lib-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h3>
-              <p class="lib-meta">${formatTime(item.updated)} · ${item.files.length} 个文件 · ${formatSize(
-                item.size
-              )}</p>
+              <p class="lib-meta">${meta}</p>
               ${tags ? `<div class="lib-tags">${tags}</div>` : ""}
               <div class="lib-chips">${chips}${notes}</div>
-              <div class="lib-actions">
-                <button type="button" data-act="read">阅读</button>
-                <button type="button" data-act="collect">归类</button>
-                <button type="button" data-act="folder">文件夹</button>
-                <button type="button" data-act="rename">重命名</button>
-                <button type="button" data-act="delete">删除</button>
-              </div>
+            </div>
+            <div class="lib-actions" role="group" aria-label="论文操作">
+              <button type="button" data-act="read" title="阅读" aria-label="阅读">${ico.read}</button>
+              <button type="button" data-act="collect" title="归入合集" aria-label="归入合集">${ico.collect}</button>
+              <button type="button" data-act="folder" title="在文件夹中显示"
+                      aria-label="在文件夹中显示">${ico.reveal}</button>
+              <button type="button" data-act="rename" title="重命名" aria-label="重命名">${ico.rename}</button>
+              <button type="button" data-act="delete" title="删除" aria-label="删除">${ico.remove}</button>
             </div>
           </article>`;
       })
       .join("");
+
+    /* Keep the selected row marked while its collect popover is open. */
+    if (state.collectId) {
+      const node = el.grid.querySelector(`.lib-card[data-id="${state.collectId}"]`);
+      if (node) node.classList.add("on");
+    }
   }
 
   /* ------------------------------------------------------ collect pop -- */
@@ -412,6 +464,8 @@
     el.popTarget.textContent = item.name;
     el.pop.hidden = false;
     renderCollectList();
+    $$(".lib-card.on", el.grid).forEach((node) => node.classList.remove("on"));
+    card.classList.add("on");
     const box = anchor.getBoundingClientRect();
     const popBox = el.pop.getBoundingClientRect();
     let left = box.left + box.width / 2 - popBox.width / 2;
@@ -428,6 +482,7 @@
     if (el.pop.hidden) return;
     el.pop.hidden = true;
     state.collectId = null;
+    $$(".lib-card.on", el.grid).forEach((node) => node.classList.remove("on"));
   }
 
   function renderCollectList() {
@@ -552,31 +607,41 @@
 
   el.grid.addEventListener("click", (event) => {
     const button = event.target.closest("[data-act]");
-    if (!button) return;
-    const card = button.closest(".lib-card");
-    const item = card ? itemById(card.dataset.id) : null;
-    if (!card || !item) return;
+    if (button) {
+      const card = button.closest(".lib-card");
+      const item = card ? itemById(card.dataset.id) : null;
+      if (!card || !item) return;
 
-    if (button.dataset.act === "read") {
-      const primary = primaryFile(item);
-      if (primary) location.href = readerLink(primary);
+      if (button.dataset.act === "read") {
+        const primary = primaryFile(item);
+        if (primary) location.href = readerLink(primary);
+        return;
+      }
+      if (button.dataset.act === "collect") {
+        openCollect(card, item, button);
+        return;
+      }
+      if (button.dataset.act === "folder") {
+        revealInFolder(item);
+        return;
+      }
+      if (button.dataset.act === "rename") {
+        startRename(card, item);
+        return;
+      }
+      if (button.dataset.act === "delete") {
+        removeItem(card, item);
+      }
       return;
     }
-    if (button.dataset.act === "collect") {
-      openCollect(card, item, button);
-      return;
-    }
-    if (button.dataset.act === "folder") {
-      revealInFolder(item);
-      return;
-    }
-    if (button.dataset.act === "rename") {
-      startRename(card, item);
-      return;
-    }
-    if (button.dataset.act === "delete") {
-      removeItem(card, item);
-    }
+
+    /* Clicking the row itself opens the paper, like a Finder list row. */
+    if (event.target.closest("a, button, input, textarea, label, .lib-actions")) return;
+    if (window.getSelection && String(window.getSelection()).length) return;
+    const card = event.target.closest(".lib-card");
+    const item = card ? itemById(card.dataset.id) : null;
+    const primary = item ? primaryFile(item) : null;
+    if (primary) location.href = readerLink(primary);
   });
 
   /* ---------------------------------------------------------- rail ops -- */
@@ -665,8 +730,21 @@
     }, 260);
   });
 
-  el.sort.addEventListener("change", () => {
-    state.sort = el.sort.value;
+  function syncSort() {
+    for (const button of $$("[data-sort]", el.sort)) {
+      const on = button.dataset.sort === state.sort;
+      button.classList.toggle("on", on);
+      button.setAttribute("aria-pressed", String(on));
+    }
+  }
+
+  el.sort.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-sort]");
+    if (!button) return;
+    const next = button.dataset.sort;
+    if (!next || next === state.sort) return;
+    state.sort = next;
+    syncSort();
     load();
   });
 
@@ -678,5 +756,6 @@
   el.addDir.addEventListener("click", addFolder);
   el.addDir2.addEventListener("click", addFolder);
 
+  syncSort();
   load();
 })();

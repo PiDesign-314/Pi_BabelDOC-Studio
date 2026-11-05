@@ -61,36 +61,41 @@ with sync_playwright() as p:
     pg.wait_for_timeout(900)
     assert pg.locator(".r-ink path").count() == 2
 
-    # page text (must not fall back to a sticky note)
+    # page text edits in place: no popover window, but a formatting bar
     pg.locator('#reader-dock [data-tool="text"]').click()
     pg.mouse.click(x + 120, y + 140)
-    pg.locator("#editor-text").fill("中文批注 Hello")
-    pg.locator("#editor-done").click()
+    pg.wait_for_selector(".r-page-text.editing")
+    assert not pg.locator("#editor").is_visible()
+    assert pg.locator("#textbar").is_visible()
+    pg.keyboard.type("中文批注 Hello")
+    pg.locator('#textbar [data-text-color="#0a84ff"]').click()
+    pg.keyboard.press("Escape")
     pg.wait_for_timeout(700)
     assert pg.locator(".r-page-text").inner_text() == "中文批注 Hello"
+    assert "10, 132, 255" in pg.eval_on_selector(".r-page-text", "el => getComputedStyle(el).color")
     assert pg.locator(".r-note").count() == 0
 
     # arming the note tool first must not leak into the text tool
-    pg.locator("#btn-note-tool").click()
+    pg.locator('#reader-dock [data-tool="note"]').click()
     pg.locator('#reader-dock [data-tool="text"]').click()
     pg.mouse.click(x + 260, y + 180)
-    pg.wait_for_timeout(300)
-    pg.locator("#editor-text").fill("第二段文字")
-    pg.locator("#editor-done").click()
-    pg.wait_for_timeout(600)
+    pg.wait_for_selector(".r-page-text.editing")
+    pg.keyboard.type("第二段文字")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(700)
     assert pg.locator(".r-page-text").count() == 2
     assert pg.locator(".r-note").count() == 0
 
     # an empty text box removes itself instead of leaving an invisible item
     pg.locator('#reader-dock [data-tool="text"]').click()
     pg.mouse.click(x + 300, y + 220)
-    pg.wait_for_timeout(300)
-    pg.locator("#editor-done").click()
-    pg.wait_for_timeout(400)
+    pg.wait_for_selector(".r-page-text.editing")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(500)
     assert pg.locator(".r-page-text").count() == 2
 
     # note, movable
-    pg.locator("#btn-note-tool").click()
+    pg.locator('#reader-dock [data-tool="note"]').click()
     pg.mouse.click(x + 20, y + 250)
     pg.locator("#editor-text").fill("Movable note")
     pg.locator("#editor-done").click()
@@ -105,9 +110,9 @@ with sync_playwright() as p:
     assert new["x"] > old["x"] + 40
 
     # hide the original half of a dual page
-    pg.locator("#toggle-original").click()
+    pg.locator('#reader-dock [data-action="original"]').click()
     assert pg.locator(".translation-only").count() == 1
-    pg.locator("#toggle-original").click()
+    pg.locator('#reader-dock [data-action="original"]').click()
     pg.wait_for_selector(".r-sheet .r-text span", timeout=30000)
     pg.wait_for_timeout(400)
 
@@ -153,14 +158,14 @@ with sync_playwright() as p:
     pg.locator("#editor-done").click()
 
     # paper theme from the dock popover
-    pg.locator("#dock-paper").click()
+    pg.locator('#reader-dock [data-action="paper"]').click()
     pg.locator('#r-pop [data-paper="ink"]').click()
     pg.wait_for_timeout(300)
     assert pg.eval_on_selector("body", "b => b.dataset.paper") == "ink"
-    pg.locator("#dock-paper").click()
+    pg.locator('#reader-dock [data-action="paper"]').click()
 
     # colour tags popover (formerly “颜色含义”)
-    pg.locator("#dock-legend").click()
+    pg.locator('#reader-dock [data-action="legend"]').click()
     pg.wait_for_timeout(250)
     assert "颜色标签" in pg.inner_text("#r-pop .r-pop-title")
     assert pg.evaluate(
@@ -173,7 +178,7 @@ with sync_playwright() as p:
     pg.locator('#r-pop [data-legend="yellow"]').fill("核对")
     pg.wait_for_timeout(200)
     assert "核对" in pg.get_attribute("#sel-toolbar .r-dot.yellow", "title")
-    pg.locator("#dock-legend").click()
+    pg.locator('#reader-dock [data-action="legend"]').click()
 
     pg.screenshot(path=str(root / "reader.png"))
 
@@ -186,8 +191,11 @@ with sync_playwright() as p:
     assert pg.locator(".r-page-text").filter(has_text="中文批注 Hello").count() == 1
     assert pg.locator(".r-mark").count() > 0
 
-    # right-click tool menu + eraser
-    pg.mouse.click(x, y, button="right")
+    # right-click tool menu + eraser (the reader restores the scroll position,
+    # so measure the page again instead of reusing the pre-reload box)
+    fresh = pg.locator(".r-sheet .r-page").first.bounding_box()
+    x, y = fresh["x"] + 200, fresh["y"] + 200
+    pg.mouse.click(x + 420, y + 600, button="right")
     assert pg.locator("#menu").is_visible()
     pg.locator("#menu button").filter(has_text="选择 / 移动").click()
     pg.locator('#reader-dock [data-tool="erase"]').click()

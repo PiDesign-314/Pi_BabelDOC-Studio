@@ -5,54 +5,63 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>结果库 · BabelDOC Studio</title>
-<link rel="icon" href="/favicon.ico" sizes="32x32">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=140" sizes="32x32">
+<link rel="icon" href="/favicon.svg?v=140" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/styles.css">
 <link rel="stylesheet" href="/assets/library.css">
 </head>
 <body class="lib-page">
 
 <header class="topbar">
-  <div class="brand">
-    <img class="mark-logo" src="/favicon.svg" width="38" height="38" alt="BabelDOC Studio">
-    <div class="brand-text">
-      <h1>结果库</h1>
-      <p>翻译完成的文件都在这里 · 可阅读、批注、按合集整理</p>
+  <div class="topbar-inner wide">
+    <div class="brand">
+      <img class="mark-logo" src="/favicon.svg?v=140" width="30" height="30" alt="BabelDOC Studio">
+      <div class="brand-text">
+        <h1>BabelDOC Studio</h1>
+        <p>结果库 · 阅读、批注与整理</p>
+      </div>
     </div>
-  </div>
-  <div class="topbar-right">
-    <a class="btn btn-secondary" href="/">返回翻译</a>
-    <button class="icon-btn" id="btn-theme" type="button" title="切换外观" aria-label="切换外观">
-      <svg class="ico-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
-           stroke-width="1.7" stroke-linecap="round">
-        <circle cx="12" cy="12" r="4"/>
-        <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/>
-      </svg>
-      <svg class="ico-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
-           stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/>
-      </svg>
-    </button>
+    <div class="topbar-right">
+      <a class="pill-btn" href="/">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+             stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M10 3.5 5.5 8l4.5 4.5"/>
+        </svg>
+        返回翻译
+      </a>
+      <button class="icon-btn" id="btn-theme" type="button" title="切换外观" aria-label="切换外观">
+        <svg class="ico-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+             stroke-width="1.7" stroke-linecap="round">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"/>
+        </svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+             stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/>
+        </svg>
+      </button>
+    </div>
   </div>
 </header>
 
 <main class="lib-wrap">
-  <aside class="lib-rail" id="rail">
+  <aside class="lib-rail" id="rail" aria-label="筛选与合集">
     <div class="rail-block">
       <button class="rail-item on" type="button" data-filter="all">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
-          <path d="M2.2 5.4 8 2.4l5.8 3-5.8 3z"/>
-          <path d="m2.2 8.6 5.8 3 5.8-3"/>
+        <svg class="rail-ico" viewBox="0 0 16 16" width="16" height="16" fill="none"
+             stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2.1" y="2.2" width="11.8" height="11.6" rx="2.6"/>
+          <path d="M2.1 6.3h11.8M6.4 6.3v7.5"/>
         </svg>
         <span class="rail-name">全部结果</span>
         <em id="count-all">0</em>
       </button>
       <button class="rail-item" type="button" data-filter="unfiled">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
-             stroke-width="1.5" aria-hidden="true">
-          <circle cx="8" cy="8" r="5.4"/>
-          <path d="M8 5.2v3.4l2.2 1.6" stroke-linecap="round"/>
+        <svg class="rail-ico" viewBox="0 0 16 16" width="16" height="16" fill="none"
+             stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true">
+          <path d="M2.1 4.6h4l1.3 1.5h6.5v5.6a1.5 1.5 0 0 1-1.5 1.5H3.6a1.5 1.5 0 0 1-1.5-1.5z"/>
+          <path d="M2.4 11.2h11.2"/>
         </svg>
         <span class="rail-name">未分类</span>
         <em id="count-unfiled">0</em>
@@ -61,7 +70,13 @@
 
     <div class="rail-head">
       <span>合集</span>
-      <button class="rail-add" id="btn-new-collection" type="button" title="新建合集">＋</button>
+      <button class="rail-add" id="btn-new-collection" type="button" title="新建合集"
+              aria-label="新建合集">
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor"
+             stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <path d="M6 2.2v7.6M2.2 6h7.6"/>
+        </svg>
+      </button>
     </div>
     <div class="rail-list" id="rail-list"></div>
     <p class="rail-empty" id="rail-empty">还没有合集。<br>点「＋」按主题把论文分组。</p>
@@ -69,25 +84,38 @@
 
   <section class="lib-main">
     <div class="lib-head">
-      <div class="lib-title">
-        <h2><span id="lib-title">全部结果</span><span class="lib-count" id="lib-count">0</span></h2>
+      <h2 class="large-title">
+        <span id="lib-title">全部结果</span>
+        <span class="lib-count" id="lib-count">0</span>
+      </h2>
+      <p class="page-sub">同篇论文的译文、双语稿与术语表归在一起。</p>
+    </div>
+
+    <div class="lib-controls">
+      <label class="lib-search">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.6"/>
+          <path d="m10.5 10.5 3 3"/>
+        </svg>
+        <input id="search" type="search" placeholder="搜索文件名…" spellcheck="false"
+               autocomplete="off" aria-label="搜索文件名">
+      </label>
+
+      <div class="segmented" id="sort" role="group" aria-label="排序方式">
+        <button type="button" data-sort="recent" class="on" aria-pressed="true">最近修改</button>
+        <button type="button" data-sort="name" aria-pressed="false">名称</button>
+        <button type="button" data-sort="size" aria-pressed="false">大小</button>
       </div>
-      <div class="lib-controls">
-        <label class="lib-search">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
-               stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
-            <circle cx="7" cy="7" r="4.6"/>
-            <path d="m10.5 10.5 3 3"/>
-          </svg>
-          <input id="search" type="search" placeholder="搜索文件名…" spellcheck="false" autocomplete="off">
-        </label>
-        <select id="sort" class="lib-sort" aria-label="排序方式">
-          <option value="recent">最近修改</option>
-          <option value="name">按名称</option>
-          <option value="size">按大小</option>
-        </select>
-        <button class="btn btn-secondary" id="btn-add-dir" type="button">添加文件夹</button>
-      </div>
+
+      <button class="btn btn-secondary" id="btn-add-dir" type="button">
+        <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor"
+             stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M1.6 4.2h3.7l1.2 1.4h5.9v5.2a1.2 1.2 0 0 1-1.2 1.2H2.8a1.2 1.2 0 0 1-1.2-1.2z"/>
+          <path d="M7 8v3.6M5.2 9.8h3.6"/>
+        </svg>
+        添加文件夹
+      </button>
     </div>
 
     <div class="lib-dirs" id="dirs" hidden></div>
@@ -96,7 +124,7 @@
 
     <div class="lib-empty" id="empty" hidden>
       <div class="lib-empty-icon" aria-hidden="true">
-        <svg viewBox="0 0 48 48" width="42" height="42" fill="none" stroke="currentColor"
+        <svg viewBox="0 0 48 48" width="40" height="40" fill="none" stroke="currentColor"
              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 12.5h11l3.5 4H39a2 2 0 0 1 2 2v18a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-22a2 2 0 0 1 2-2Z"/>
           <path d="M24 26v8m0 0 3.5-3.5M24 34l-3.5-3.5"/>
@@ -116,7 +144,8 @@
   <div class="lib-pop-head">归入合集 <span id="collect-target"></span></div>
   <div class="lib-pop-list" id="collect-list"></div>
   <form class="lib-pop-form" id="collect-form">
-    <input id="collect-name" type="text" placeholder="新建合集并归入…" maxlength="40" autocomplete="off">
+    <input id="collect-name" type="text" placeholder="新建合集并归入…" maxlength="40"
+           autocomplete="off" aria-label="新合集名称">
     <button type="submit">创建</button>
   </form>
 </div>

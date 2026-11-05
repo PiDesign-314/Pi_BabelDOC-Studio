@@ -95,7 +95,16 @@
     dock: $("#reader-dock"),
     pop: $("#r-pop"),
     selStyles: $("#sel-styles"),
-    toggleOriginal: $("#toggle-original"),
+    sideResize: $("#side-resize"),
+    textbar: $("#textbar"),
+    textbarFont: $("#textbar-font"),
+    textbarFontName: $("#textbar-font-name"),
+    textbarSize: $("#textbar-size"),
+    textbarDone: $("#textbar-done"),
+    banner: $("#server-banner"),
+    bannerRestart: $("#banner-restart"),
+    bannerClose: $("#banner-close"),
+    fontUpload: $("#font-upload"),
   };
 
   const state = {
@@ -110,8 +119,12 @@
     items: [],
     byPage: new Map(),
     activeId: null,
+    editingId: null,
     flashId: null,
     noteTool: false,
+    marginMode: false,
+    serverStale: false,
+    colorFilter: new Set(),
     pending: null,
     saveTimer: null,
     observer: null,
@@ -128,8 +141,7 @@
     scrollAt: 0,
   };
 
-  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-  const reduceMotion = () =>
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));  const reduceMotion = () =>
     Boolean(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const uid = () =>
     Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -210,7 +222,10 @@
   /* ------------------------------------------------------------- layout -- */
   function computeScale() {
     if (!state.fit) return;
-    const width = Math.max(240, el.stage.clientWidth - 48);
+    /* Margin notes sit right of the page, so the page has to give that gutter
+       back before the zoom is calculated. */
+    const gutter = state.marginMode ? 288 : 0;
+    const width = Math.max(240, el.stage.clientWidth - 48 - gutter);
     const height = Math.max(240, el.stage.clientHeight - 44);
     const widthScale = width / (state.base.w * (!originalVisible && state.base.w > state.base.h * 1.2 ? 0.5 : 1));
     const heightScale = height / state.base.h;
@@ -1452,7 +1467,10 @@
     sheet.anno.innerHTML = "";
     const scale = state.scale;
     const items = state.byPage.get(sheet.no) || [];
-    if (!items.length) return;
+    if (!items.length) {
+      renderMarginCards(sheet);
+      return;
+    }
     const fragment = document.createDocumentFragment();
 
     for (const item of items) {
@@ -1469,6 +1487,7 @@
           mark.style.top = `${rect.y * scale}px`;
           mark.style.width = `${rect.w * scale}px`;
           mark.style.height = `${rect.h * scale}px`;
+          paintMarkFinish(mark, item);
           fragment.appendChild(mark);
         }
         const anchor = badgeAnchor(item, sheet);
@@ -1502,6 +1521,51 @@
     /* A repaint replaces the badge the pointer was resting on, so drop a
        preview that no longer has anything to point at. */
     if (state.tipId && !sheet.anno.querySelector(`[data-id="${state.tipId}"]`)) hideTip();
+    renderMarginCards(sheet);
+  }
+
+  /* Hand-drawn / crayon marks get an irregular edge; the deterministic jitter
+     keeps a mark stable across repaints and zoom changes. */
+  function paintMarkFinish(mark, item) {
+    const style = item.style || "marker";
+    if (style === "wavy") {
+      mark.style.background = "none";
+      mark.style.backgroundImage = wavyStrip(COLOR_HEX[item.color] || COLOR_HEX.yellow);
+      mark.style.backgroundRepeat = "repeat-x";
+      mark.style.backgroundPosition = "left bottom";
+      mark.style.backgroundSize = "12px 6px";
+      return;
+    }
+    if (style !== "hand" && style !== "crayon") return;
+    let seed = 2166136261;
+    for (const ch of String(item.id || "")) {
+      seed ^= ch.charCodeAt(0);
+      seed = Math.imul(seed, 16777619) >>> 0;
+    }
+    const random = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    const points = [];
+    const steps = 7;
+    for (let index = 0; index <= steps; index += 1) {
+      const x = (index / steps) * 100;
+      const y = 1 + random() * 15;
+      points.push(`${x.toFixed(1)}% ${y.toFixed(1)}%`);
+    }
+    for (let index = steps; index >= 0; index -= 1) {
+      const x = (index / steps) * 100;
+      const y = 84 + random() * 15;
+      points.push(`${x.toFixed(1)}% ${y.toFixed(1)}%`);
+    }
+    mark.style.clipPath = `polygon(${points.join(",")})`;
+  }
+
+  function wavyStrip(color) {
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="6">` +
+      `<path d="M0 4.4q3-4 6 0t6 0" fill="none" stroke="${color}" stroke-width="1.9" stroke-linecap="round"/></svg>`;
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
   }
 
   /* --------------------------------------------------------- note preview -- */
@@ -1576,28 +1640,58 @@
 
   function refreshAnnotations(pageList) {
     const pages = pageList && pageList.length ? new Set(pageList) : null;
+    const editing = state.editingId
+      ? state.items.find((item) => item.id === state.editingId)
+      : null;
     for (const sheet of state.sheets) {
       if (!sheet.painted && !sheet.textReady) continue;
       if (pages && !pages.has(sheet.no)) continue;
+      /* Never wipe the contenteditable while the user is typing in it. */
+      if (editing && editing.page === sheet.no) {
+        renderMarginCards(sheet);
+        continue;
+      }
       renderSheetAnnotations(sheet);
     }
   }
 
   function renderNotesList() {
-    el.annoCount.textContent = String(state.items.length);
-    if (!state.items.length) {
+    const all = [...state.items].sort((a, b) => a.page - b.page || a.created - b.created);
+    const active = state.colorFilter;
+    const visible = active.size ? all.filter((item) => active.has(item.color)) : all;
+    el.annoCount.textContent = active.size ? `${visible.length}/${all.length}` : String(all.length);
+    const chips =
+      '<div class="r-filter" role="group" aria-label="按颜色筛选">' +
+      `<button type="button" class="r-filter-chip${active.size ? "" : " on"}" data-filter="all">全部</button>` +
+      Object.keys(COLOR_HEX)
+        .map(
+          (color) =>
+            `<button type="button" class="r-filter-chip${active.has(color) ? " on" : ""}" data-filter="${color}" title="${COLOR_LABEL[color]}"><span class="r-dotview" style="background:${COLOR_HEX[color]}"></span></button>`
+        )
+        .join("") +
+      "</div>";
+    if (!all.length) {
       el.panelNotes.innerHTML =
-        '<p class="r-empty">还没有批注。<br>选中正文即可高亮，<br>或用「批注」工具在页面上做便签。<br>' +
-        "划线带备注时行尾会出现便签标志，<br>鼠标悬停即可预览。</p>";
+        chips +
+        '<p class="r-empty">还没有批注。<br>选中正文即可高亮，<br>或用「便签」工具在页面上做便签。<br>' +
+        "带备注的批注会在行尾出现小旗标，<br>鼠标悬停即可预览。</p>";
       return;
     }
-    const sorted = [...state.items].sort((a, b) => a.page - b.page || a.created - b.created);
-    el.panelNotes.innerHTML = sorted
-      .map(
-        (item) => `
+    if (!visible.length) {
+      el.panelNotes.innerHTML =
+        chips + '<p class="r-empty">没有这个颜色的批注。<br>点「全部」查看所有批注。</p>';
+      return;
+    }
+    el.panelNotes.innerHTML =
+      chips +
+      visible
+        .map(
+          (item) => `
         <article class="r-card" data-id="${item.id}">
           <div class="r-card-top">
-            <span class="r-badge-page">第 ${item.page} 页 · ${({note:"便签",highlight:"高亮",text:"文字",ink:"画笔"}[item.type] || "批注")}</span>
+            <span class="r-badge-page">第 ${item.page} 页 · ${
+              { note: "便签", highlight: "高亮", text: "文字", ink: "画笔" }[item.type] || "批注"
+            }</span>
             <span class="r-dotview ${item.color}" style="background:${
               COLOR_HEX[item.color] || COLOR_HEX.yellow
             }"></span>
@@ -1608,8 +1702,8 @@
             item.comment ? escapeHtml(item.comment.slice(0, 400)) : "（无批注文字）"
           }</p>
         </article>`
-      )
-      .join("");
+        )
+        .join("");
   }
 
   let saveRevision = 0;
@@ -1654,9 +1748,9 @@
         if (!partial) savedRevision = revision;
         if (saveRevision === revision) {
           if (partial) {
-            el.saved.textContent = "部分未保存";
+            el.saved.textContent = "需重启应用";
             el.saved.classList.remove("ok");
-            toast("有批注没能保存：请重启应用后再试", "bad");
+            showStaleBanner();
           } else {
             el.saved.textContent = "已保存";
             el.saved.classList.add("ok");
@@ -1851,14 +1945,14 @@
     }, 0);
   }
 
-  function highlightSelection(color) {
+  function highlightSelection(color, style) {
     const captured = state.pending;
     if (!captured) return null;
     const item = addAnnotation({
       type: "highlight",
       page: captured.parts[0].page,
       color,
-      style: document.querySelector("#highlight-style").value,
+      style: style || document.querySelector("#highlight-style").value || "marker",
       rects: captured.rects,
       ranges: captured.parts,
       text: captured.text,
@@ -1943,6 +2037,12 @@
   function openEditor(id, event) {
     const item = state.items.find((entry) => entry.id === id);
     if (!item) return;
+    /* Page text edits in place; the floating editor is only for notes,
+       highlights and ink sketches. */
+    if (item.type === "text") {
+      beginTextEdit(id);
+      return;
+    }
     state.activeId = id;
     loadDrawingControls(item);
     el.editor.hidden = false;
@@ -2195,6 +2295,8 @@
       toast("还没有批注可以导出", "bad");
       return;
     }
+    el.menu.classList.remove("r-menu-rich");
+    el.menu.onclick = null;
     el.menu.innerHTML =
       '<button type="button" data-act="md">导出 Markdown<span class="r-menu-hint">.md</span></button>' +
       '<button type="button" data-act="pdf">保存带批注的 PDF<span class="r-menu-hint">.pdf</span></button>' +
@@ -2220,6 +2322,7 @@
   function closeMenu() {
     if (el.menu.hidden) return;
     el.menu.hidden = true;
+    el.menu.onclick = null;
     el.exportBtn.setAttribute("aria-expanded", "false");
   }
 
@@ -2301,8 +2404,10 @@
       if (!section) return;
       const sheet = state.sheets[Number(section.dataset.page) - 1];
       if (!sheet) return;
+      if (event.target.closest(".r-page-text, .r-ink, .r-margin")) return;
       if (window.getSelection() && !window.getSelection().isCollapsed) return;
       if (event.target.closest(".r-note")) return;
+      if (state.editingId) endTextEdit();
 
       if (state.noteTool) {
         const item = addAnnotation({
@@ -2395,6 +2500,11 @@
     document.addEventListener("keydown", (event) => {
       const tag = (event.target.tagName || "").toLowerCase();
       if (event.key === "Escape") {
+        if (state.editingId) {
+          event.preventDefault();
+          endTextEdit();
+          return;
+        }
         hideSelectionToolbar();
         hideTip();
         closeMenu();
@@ -2447,21 +2557,148 @@
   try { readerPrefs = JSON.parse(localStorage.getItem('babeldoc-reader') || '{}') || {}; } catch {}
   let drawingTool = 'select';
   let originalVisible = true;
-  const control = id => document.getElementById(id);
-  function storePrefs() { try { localStorage.setItem('babeldoc-reader', JSON.stringify(readerPrefs)); } catch {} }
+  const control = (id) => document.getElementById(id);
+  function storePrefs() {
+    try { localStorage.setItem('babeldoc-reader', JSON.stringify(readerPrefs)); } catch {}
+  }
   function cropSheet(sheet) {
     const dims = state.dims.get(sheet.no) || state.base;
     const crop = !originalVisible && dims.w > dims.h * 1.2;
     sheet.el.classList.toggle('translation-only', crop);
     sheet.el.style.width = crop ? `${sheet.width / 2}px` : '';
   }
+
+  /* ------------------------------------------------------ icon artwork -- */
+  /* Hand-drawn SF-Symbols-like glyphs: 20×20 grid, 1.5px rounded strokes. */
+  const ICONS = {
+    select: '<path d="M5.4 3.3v11.2l3-2.7 1.9 4.2 2.2-.9-1.9-4.2h4.1z"/>',
+    text: '<path d="M4 5.3V3.7h12v1.6M10 3.7v12.2M7.4 15.9h5.2"/>',
+    note: '<path d="M4.2 3.7h11.6v8.3l-3.8 3.8H4.2z"/><path d="M15.8 12h-3.8v3.8"/>',
+    pen: '<path d="M13.5 3.4 16.6 6.5l-8.7 8.7-4 .9.9-4z"/><path d="m11.7 5.2 3.1 3.1"/>',
+    line: '<path d="M4.4 15.6 15.6 4.4"/><circle cx="4.4" cy="15.6" r="1.15" fill="currentColor" stroke="none"/><circle cx="15.6" cy="4.4" r="1.15" fill="currentColor" stroke="none"/>',
+    erase: '<path d="m8.7 15.7-4.9-4.9a1.5 1.5 0 0 1 0-2.1l5.2-5.2a1.5 1.5 0 0 1 2.1 0l4 4a1.5 1.5 0 0 1 0 2.1l-6.4 6.1z"/><path d="M6.1 7.2 12.7 13.8M4 16.4h12.2"/>',
+    highlighter: '<path d="M12.4 3.3 16.7 7.6 9.3 15H4.5v-4.8z"/><path d="M10.7 5 15 9.3M3.5 16.5h13"/>',
+    crayon: '<path d="M7.6 15.6 4.4 12.4l6.9-8.8 3.1 3.1z"/><path d="m11.8 4.4 3.2 3.2M3.8 16.5h12.4"/>',
+    hand: '<path d="M3.6 13.9c1.3-3.6 2.7-3.8 3.4-.9.7 2.9 2.1 3 3.2.5 1-2.4 2.4-2.6 3-.6.4 1.4 1.3 1.8 2.6 1.3"/>',
+    underline: '<path d="M6.3 3.8v6.1a3.7 3.7 0 0 0 7.4 0V3.8M4.6 16.2h10.8"/>',
+    pencil: '<path d="M14.1 3.6 16.4 5.9 7.4 14.9H5.1v-2.3z"/><path d="M4.2 17h6.4" stroke-dasharray="1.6 1.6"/>',
+    wavy: '<path d="M3.4 10.6c1.6-2.4 3.2-2.4 4.8 0s3.2 2.4 4.8 0 3.2-2.4 4.6-.3"/>',
+    font: '<path d="M3.3 15.8 7 5.2h1.2l3.7 10.6M4.9 12h6.1M14.4 15.8v-5.2M13 10.6h2.8"/>',
+    paper: '<rect x="4.2" y="2.9" width="11.6" height="14.2" rx="1.7"/><path d="M7.2 6.4h5.6M7.2 9.2h5.6M7.2 12h3.2"/>',
+    original: '<rect x="2.7" y="3.8" width="14.6" height="12.4" rx="1.8"/><path d="M10 3.8v12.4M17.3 6.4h-2.6M17.3 10h-2.6M17.3 13.6h-2.6"/>',
+    legend: '<path d="M3.6 10.2V4.1h6.1l6.7 6.7-6.1 6.1z"/><circle cx="6.6" cy="7.1" r="1" fill="currentColor" stroke="none"/>',
+    layout: '<rect x="2.6" y="3.8" width="14.8" height="12.4" rx="1.8"/><path d="M12.8 3.8v12.4"/>',
+    settings: '<path d="M4 6.4h12M4 13.6h12"/><circle cx="8" cy="6.4" r="1.9" fill="currentColor" stroke="none"/><circle cx="12.8" cy="13.6" r="1.9" fill="currentColor" stroke="none"/>',
+    up: '<path d="M10 15V5M6 9l4-4 4 4"/>',
+    down: '<path d="M10 5v10M6 11l4 4 4-4"/>',
+    copy: '<rect x="6.5" y="6.5" width="9" height="9" rx="1.6"/><path d="M4.5 12.5H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h7.5a1 1 0 0 1 1 1v.5"/>',
+    trash: '<path d="M4.5 6h11M8 6V4.2h4V6M6.2 6l.7 10h6.2l.7-10M8.6 9v4M11.4 9v4"/>',
+    edit: '<path d="M13.6 3.4 16.6 6.4 7.8 15.2l-4 1 1-4z"/>',
+    search: '<circle cx="8.6" cy="8.6" r="4.6"/><path d="m12.2 12.2 4 4"/>',
+  };
+  function icon(name, size = 19) {
+    return `<svg viewBox="0 0 20 20" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+  }
+
+  /* ------------------------------------------------------ dock catalogue -- */
+  const DOCK_ITEMS = {
+    select: { kind: "tool", label: "选择 / 移动", icon: "select", hint: "V" },
+    text: { kind: "tool", label: "页面文字", icon: "text", hint: "T" },
+    note: { kind: "tool", label: "便签", icon: "note", hint: "N" },
+    pen: { kind: "tool", label: "自由画", icon: "pen", hint: "P" },
+    line: { kind: "tool", label: "直线", icon: "line", hint: "L" },
+    erase: { kind: "tool", label: "橡皮擦：整笔删除", icon: "erase", hint: "E" },
+    marker: { kind: "style", label: "荧光笔", icon: "highlighter" },
+    crayon: { kind: "style", label: "蜡笔", icon: "crayon" },
+    hand: { kind: "style", label: "手绘", icon: "hand" },
+    underline: { kind: "style", label: "实线划线", icon: "underline" },
+    ink: { kind: "action", label: "墨色、粗细与不透明度", icon: "swatch" },
+    font: { kind: "action", label: "字体与字号", icon: "font" },
+    paper: { kind: "action", label: "纸面颜色", icon: "paper" },
+    original: { kind: "action", label: "隐藏左侧原文", icon: "original" },
+    legend: { kind: "action", label: "颜色标签", icon: "legend" },
+    layout: { kind: "action", label: "批注显示：页面内 / 页边距", icon: "layout" },
+    settings: { kind: "action", label: "自定义工具栏", icon: "settings" },
+  };
+  const DOCK_DEFAULT = [
+    "select", "text", "note", "pen", "line", "erase", "|",
+    "marker", "crayon", "hand", "underline", "|",
+    "ink", "font", "paper", "original", "legend", "layout", "settings",
+  ];
+  const HIGHLIGHT_STYLES = [
+    { id: "marker", label: "荧光笔", icon: "highlighter" },
+    { id: "crayon", label: "蜡笔", icon: "crayon" },
+    { id: "hand", label: "手绘", icon: "hand" },
+    { id: "underline", label: "实线划线", icon: "underline" },
+    { id: "pencil", label: "铅笔划线", icon: "pencil" },
+    { id: "wavy", label: "波浪线", icon: "wavy" },
+  ];
+  const BUILTIN_FONTS = [
+    { css: "sans-serif", label: "系统黑体" },
+    { css: "serif", label: "系统宋体" },
+    { css: '"KaiTi","STKaiti","楷体",serif', label: "楷体" },
+    { css: '"FangSong","STFangsong","仿宋",serif', label: "仿宋" },
+    { css: "monospace", label: "等宽" },
+  ];
+
+  function dockState() {
+    const prefs = readerPrefs.dock && typeof readerPrefs.dock === "object" ? readerPrefs.dock : {};
+    const order = Array.isArray(prefs.order)
+      ? prefs.order.filter((id) => id === "|" || DOCK_ITEMS[id])
+      : [...DOCK_DEFAULT];
+    for (const id of DOCK_DEFAULT) if (!order.includes(id)) order.push(id);
+    const hidden = Array.isArray(prefs.hidden) ? prefs.hidden.filter((id) => DOCK_ITEMS[id]) : [];
+    readerPrefs.dock = { order, hidden };
+    return readerPrefs.dock;
+  }
+
+  function renderDock() {
+    if (!el.dock) return;
+    const prefs = dockState();
+    const hidden = new Set(prefs.hidden);
+    const fragment = document.createDocumentFragment();
+    for (const id of prefs.order) {
+      if (id === "|") {
+        const sep = document.createElement("span");
+        sep.className = "r-dock-sep";
+        sep.setAttribute("aria-hidden", "true");
+        fragment.append(sep);
+        continue;
+      }
+      if (hidden.has(id)) continue;
+      const item = DOCK_ITEMS[id];
+      if (!item) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "r-dock-btn";
+      button.dataset.item = id;
+      if (item.kind === "tool") button.dataset.tool = id;
+      else if (item.kind === "style") button.dataset.style = id;
+      else button.dataset.action = id;
+      const title = item.hint ? `${item.label}（${item.hint}）` : item.label;
+      button.title = title;
+      button.setAttribute("aria-label", item.label);
+      if (id === "ink") {
+        button.classList.add("r-dock-swatch");
+        button.innerHTML = '<span class="r-dock-dot" id="dock-ink-dot"></span>';
+      } else {
+        button.innerHTML = icon(item.icon);
+      }
+      fragment.append(button);
+    }
+    el.dock.replaceChildren(fragment);
+    refreshDock();
+  }
+
   function setDrawingTool(tool) {
     if (tool === "note") {
       closeEditor();
-      if (!state.noteTool) el.noteTool.click();
+      endTextEdit();
+      el.noteTool.click();
       refreshDock();
       return;
     }
+    if (state.editingId) endTextEdit();
     drawingTool = tool;
     control("draw-tool").value = tool;
     el.pages.classList.toggle("drawing", tool !== "select");
@@ -2484,107 +2721,479 @@
       button.setAttribute("aria-pressed", String(on));
     }
     const style = control("highlight-style").value || "marker";
-    for (const button of $$("button[data-style]")) {
+    for (const button of el.dock.querySelectorAll("[data-style]")) {
+      const on = button.dataset.style === style;
+      button.classList.toggle("on", on);
+      button.setAttribute("aria-pressed", String(on));
+    }
+    for (const button of $$("button.r-style-btn[data-style]")) {
       const on = button.dataset.style === style;
       button.classList.toggle("on", on);
       button.setAttribute("aria-pressed", String(on));
     }
     const dot = control("dock-ink-dot");
-    if (dot) dot.style.background = control("ink-color").value;
-    const paper = control("dock-paper");
+    if (dot) {
+      dot.style.background = control("ink-color").value;
+      dot.style.opacity = String((+control("ink-opacity").value || 100) / 100);
+    }
+    const paper = el.dock.querySelector('[data-action="paper"]');
     if (paper) paper.classList.toggle("on", (control("paper-theme").value || "white") !== "white");
-    const original = control("toggle-original");
+    const original = el.dock.querySelector('[data-action="original"]');
     if (original) {
       original.setAttribute("aria-pressed", String(originalVisible));
       const title = originalVisible ? "隐藏左侧原文（适用于左右对照 PDF）" : "显示左侧原文";
       original.title = title;
       original.setAttribute("aria-label", title);
     }
+    const layout = el.dock.querySelector('[data-action="layout"]');
+    if (layout) {
+      layout.classList.toggle("on", state.marginMode);
+      layout.setAttribute("aria-pressed", String(state.marginMode));
+    }
+    const fontName = control("text-font").value || "sans-serif";
+    const fontBtn = el.dock.querySelector('[data-action="font"]');
+    if (fontBtn) fontBtn.title = `字体与字号 · ${fontLabel(fontName)}`;
   }
 
   function setHighlightStyle(style) {
-    if (!["marker", "underline", "pencil"].includes(style)) return;
+    if (!HIGHLIGHT_STYLES.some((item) => item.id === style)) return;
     control("highlight-style").value = style;
     control("highlight-style").dispatchEvent(new Event("input", { bubbles: true }));
     refreshDock();
   }
 
-  function drawingOptions() {
-    return {inkColor:control('ink-color').value, width:clamp(+control('ink-width').value || 2,.5,30),
-      opacity:+control('ink-opacity').value / 100, fontFamily:control('text-font').value,
-      fontSize:clamp(+control('text-size').value || 18,8,96)};
+  function applyMarginMode(enabled) {
+    state.marginMode = Boolean(enabled);
+    readerPrefs.marginNotes = state.marginMode;
+    storePrefs();
+    document.body.classList.toggle("margin-notes", state.marginMode);
+    if (state.fit) relayout(scrollAnchor());
+    else refreshAnnotations();
+    refreshDock();
   }
+
+  function toggleMarginMode() {
+    applyMarginMode(!state.marginMode);
+    toast(state.marginMode ? "批注显示在页边距" : "批注显示在页面内", "good");
+  }
+
+  function drawingOptions() {
+    return {
+      inkColor: control("ink-color").value,
+      width: clamp(+control("ink-width").value || 2, 0.5, 30),
+      opacity: +control("ink-opacity").value / 100,
+      fontFamily: control("text-font").value || "sans-serif",
+      fontSize: clamp(+control("text-size").value || 18, 8, 96),
+    };
+  }
+
   function loadDrawingControls(item) {
-    if (item.type === 'highlight') control('highlight-style').value = item.style || 'marker';
-    if (['ink','text'].includes(item.type)) {
-      control('ink-color').value = item.inkColor || '#30343b';
-      control('ink-width').value = item.width || 2;
-      control('ink-opacity').value = (item.opacity ?? 1)*100;
-      control('text-size').value = item.fontSize || 18;
-      if (![...control('text-font').options].some(o => o.value === item.fontFamily)) {
-        control('text-font').add(new Option(item.fontFamily || 'sans-serif'));
-      }
-      control('text-font').value = item.fontFamily || 'sans-serif';
+    if (item.type === "highlight") control("highlight-style").value = item.style || "marker";
+    if (["ink", "text"].includes(item.type)) {
+      control("ink-color").value = item.inkColor || "#30343b";
+      control("ink-width").value = item.width || 2;
+      control("ink-opacity").value = (item.opacity ?? 1) * 100;
+      control("text-size").value = item.fontSize || 18;
+      control("text-font").value = item.fontFamily || "sans-serif";
     }
     refreshDock();
   }
+
   function commitDrawing(item) {
-    item.updated = Date.now()/1000;
-    reindex(); refreshAnnotations([item.page]); renderNotesList(); persist();
+    item.updated = Date.now() / 1000;
+    reindex();
+    refreshAnnotations([item.page]);
+    renderNotesList();
+    persist();
   }
+
+  /* ----------------------------------------------------------- fonts -- */
+  const FONTS = { list: [], byCss: new Map(), ready: false };
+  async function loadFonts() {
+    try {
+      const data = await api("/api/fonts");
+      const list = Array.isArray(data.fonts) ? data.fonts.filter((f) => f && f.css) : [];
+      if (!list.length) return;
+      FONTS.list = list;
+      FONTS.byCss = new Map(list.map((font) => [font.css, font]));
+      let sheet = document.getElementById("bdf-fonts");
+      if (!sheet) {
+        sheet = document.createElement("style");
+        sheet.id = "bdf-fonts";
+        document.head.append(sheet);
+      }
+      sheet.textContent = list
+        .map(
+          (font) =>
+            `@font-face{font-family:"${font.css}";src:url("/api/font-file/${encodeURIComponent(
+              font.id
+            )}");font-display:swap}`
+        )
+        .join("\n");
+      FONTS.ready = true;
+      refreshAnnotations();
+      updateTextbar();
+      if (el.pop && !el.pop.hidden && el.pop.dataset.kind === "font") renderFontPopover();
+    } catch {
+      /* an older server simply has no font registry */
+    }
+  }
+  function fontStack(value) {
+    const css = String(value || "sans-serif");
+    if (["sans-serif", "serif", "monospace", "cursive"].includes(css)) return css;
+    if (FONTS.byCss.has(css)) return `"${css}", "PingFang SC", "Microsoft YaHei", sans-serif`;
+    return css;
+  }
+  function fontLabel(value) {
+    const font = FONTS.byCss.get(value);
+    if (font) return font.label || font.family || value;
+    const builtin = BUILTIN_FONTS.find((item) => item.css === value);
+    return builtin ? builtin.label : value;
+  }
+  function applyTextStyle(node, item) {
+    node.style.color = item.inkColor || "#1d1d1f";
+    node.style.fontFamily = fontStack(item.fontFamily || "sans-serif");
+    node.style.fontSize = `${(item.fontSize || 18) * state.scale}px`;
+    node.style.opacity = String(item.opacity ?? 1);
+  }
+
+  /* ------------------------------------------------------ text editing -- */
+  function textNode(id) {
+    return document.querySelector(`.r-page-text[data-id="${id}"]`);
+  }
+  function beginTextEdit(id) {
+    const item = state.items.find((entry) => entry.id === id);
+    if (!item || item.type !== "text") return;
+    if (state.editingId === id) {
+      focusText(id);
+      return;
+    }
+    closeEditor(true);
+    hideSelectionToolbar();
+    if (state.editingId) endTextEdit();
+    state.activeId = id;
+    /* Render the plain version first, then flip the node itself into edit
+       mode: re-rendering afterwards would drop the caret. */
+    state.editingId = null;
+    refreshAnnotations([item.page]);
+    state.editingId = id;
+    const node = textNode(id);
+    if (!node) return;
+    node.classList.add("editing");
+    node.contentEditable = "plaintext-only";
+    node.spellcheck = false;
+    node.textContent = item.comment || "";
+    updateTextbar();
+    requestAnimationFrame(() => focusText(id));
+  }
+  function focusText(id) {
+    const node = textNode(id);
+    if (!node) return;
+    node.focus();
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    range.collapse(false);
+    const selection = window.getSelection();
+    if (!selection) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  function endTextEdit() {
+    if (!state.editingId) return;
+    const id = state.editingId;
+    const item = state.items.find((entry) => entry.id === id);
+    const node = textNode(id);
+    if (item && node) {
+      item.comment = node.innerText.replace(/\u00a0/g, " ").replace(/\n{3,}/g, "\n\n").trimEnd();
+      item.updated = Date.now() / 1000;
+    }
+    state.editingId = null;
+    state.activeId = null;
+    document.body.classList.remove("editing-text");
+    updateTextbar();
+    if (!item) return;
+    if (!item.comment.trim()) {
+      removeAnnotation(id);
+      return;
+    }
+    reindex();
+    refreshAnnotations([item.page]);
+    renderNotesList();
+    persist();
+  }
+  function updateTextbar() {
+    if (!el.textbar) return;
+    const item = state.items.find((entry) => entry.id === state.activeId);
+    const on = Boolean(state.editingId) && Boolean(item) && item.type === "text";
+    el.textbar.hidden = !on;
+    document.body.classList.toggle("editing-text", on);
+    if (!on) return;
+    for (const dot of $$("#textbar-colors .r-tdot[data-text-color]")) {
+      dot.classList.toggle(
+        "on",
+        String(item.inkColor || "#1d1d1f").toLowerCase() === dot.dataset.textColor.toLowerCase()
+      );
+    }
+    el.textbarFontName.textContent = fontLabel(item.fontFamily || "sans-serif");
+    el.textbarSize.textContent = String(Math.round(item.fontSize || 18));
+    el.textbarFont.title = `选择字体 · ${fontLabel(item.fontFamily || "sans-serif")}`;
+  }
+  function styleTextItem(patch) {
+    const item = state.items.find((entry) => entry.id === state.activeId);
+    if (!item || item.type !== "text") return;
+    Object.assign(item, patch);
+    item.updated = Date.now() / 1000;
+    const node = textNode(item.id);
+    if (node) applyTextStyle(node, item);
+    updateTextbar();
+    persist();
+  }
+
+  function renderTextItem(item, sheet) {
+    const node = document.createElement("div");
+    node.className = "r-page-text";
+    node.dataset.id = item.id;
+    node.textContent = item.comment || "";
+    if (!item.comment) node.dataset.placeholder = "输入文字";
+    node.style.left = `${item.point.x * state.scale}px`;
+    node.style.top = `${item.point.y * state.scale}px`;
+    applyTextStyle(node, item);
+    if (state.editingId === item.id) {
+      node.classList.add("editing");
+      node.contentEditable = "plaintext-only";
+      node.spellcheck = false;
+    } else {
+      node.addEventListener("click", (event) => {
+        event.stopPropagation();
+        beginTextEdit(item.id);
+      });
+      bindMovable(node, item, sheet);
+    }
+    return node;
+  }
+
   function renderDrawing(item, sheet) {
     const scale = state.scale;
-    if (item.type === 'text') {
-      const node = document.createElement('button');
-      node.type = 'button';
-      node.className = 'r-page-text'; node.dataset.id = item.id;
-      node.textContent = item.comment || '点击编辑文字';
-      node.title = '拖动移动 · 点击编辑';
-      Object.assign(node.style, {left:`${item.point.x*scale}px`,top:`${item.point.y*scale}px`,color:item.inkColor,
-        opacity:item.opacity ?? 1,fontFamily:item.fontFamily || 'sans-serif',fontSize:`${(item.fontSize || 18)*scale}px`});
-      bindMovable(node,item,sheet);
-      node.addEventListener('click',event=>{event.stopPropagation();openEditor(item.id,event);});
-      return node;
-    }
-    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-    svg.classList.add('r-ink'); svg.setAttribute('width',sheet.width); svg.setAttribute('height',sheet.height);
-    const path = document.createElementNS(svg.namespaceURI,'path');
+    if (item.type === "text") return renderTextItem(item, sheet);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("r-ink");
+    svg.setAttribute("width", sheet.width);
+    svg.setAttribute("height", sheet.height);
+    const path = document.createElementNS(svg.namespaceURI, "path");
     path.dataset.id = item.id;
-    path.setAttribute('d',(item.points || []).map((p,i)=>`${i?'L':'M'}${p.x*scale},${p.y*scale}`).join(' '));
-    path.setAttribute('fill','none');path.setAttribute('stroke',item.inkColor || '#30343b');
-    path.setAttribute('stroke-width',(item.width || 2)*scale);path.setAttribute('stroke-opacity',item.opacity ?? 1);
-    path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');
-    path.addEventListener('click',event=>{event.stopPropagation(); if(drawingTool==='select')openEditor(item.id,event);});
-    svg.append(path); return svg;
+    path.setAttribute(
+      "d",
+      (item.points || []).map((p, i) => `${i ? "L" : "M"}${p.x * scale},${p.y * scale}`).join(" ")
+    );
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", item.inkColor || "#30343b");
+    path.setAttribute("stroke-width", (item.width || 2) * scale);
+    path.setAttribute("stroke-opacity", item.opacity ?? 1);
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    path.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (drawingTool === "select" && !state.editingId) openEditor(item.id, event);
+    });
+    svg.append(path);
+    return svg;
   }
-  function bindMovable(node,item,sheet) {
-    node.addEventListener('pointerdown',event=>{
-      if (event.button !== 0 || drawingTool !== 'select' || state.noteTool) return;
-      event.stopPropagation(); event.preventDefault();
-      const start = {x:event.clientX,y:event.clientY}; const point = {...item.point}; let moved=false;
+
+  function bindMovable(node, item, sheet) {
+    node.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || drawingTool !== "select" || state.noteTool) return;
+      if (state.editingId === item.id) return;
+      event.stopPropagation();
+      event.preventDefault();
+      const start = { x: event.clientX, y: event.clientY };
+      const point = { ...item.point };
+      let moved = false;
       node.setPointerCapture(event.pointerId);
-      const move = e => {
-        if(Math.hypot(e.clientX-start.x,e.clientY-start.y)<4 && !moved)return;
-        moved=true; hideTip();
-        item.point={x:clamp(point.x+(e.clientX-start.x)/state.scale,0,sheet.width/state.scale-8),
-          y:clamp(point.y+(e.clientY-start.y)/state.scale,0,sheet.height/state.scale-8)};
-        node.style.left=`${item.point.x*state.scale}px`;node.style.top=`${item.point.y*state.scale}px`;
+      const move = (e) => {
+        if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < 4 && !moved) return;
+        moved = true;
+        hideTip();
+        item.point = {
+          x: clamp(point.x + (e.clientX - start.x) / state.scale, 0, sheet.width / state.scale - 8),
+          y: clamp(point.y + (e.clientY - start.y) / state.scale, 0, sheet.height / state.scale - 8),
+        };
+        node.style.left = `${item.point.x * state.scale}px`;
+        node.style.top = `${item.point.y * state.scale}px`;
       };
-      const end = e => {
-        node.removeEventListener('pointermove',move);node.removeEventListener('pointerup',end);node.removeEventListener('pointercancel',end);
-        if(e.type==='pointercancel') {item.point=point;refreshAnnotations([item.page]);return;}
-        if(moved) {node.addEventListener('click',e=>{e.stopImmediatePropagation();e.preventDefault();},{once:true,capture:true});commitDrawing(item);}
+      const end = (e) => {
+        node.removeEventListener("pointermove", move);
+        node.removeEventListener("pointerup", end);
+        node.removeEventListener("pointercancel", end);
+        if (e.type === "pointercancel") {
+          item.point = point;
+          refreshAnnotations([item.page]);
+          return;
+        }
+        if (moved) {
+          node.addEventListener("click", (e) => { e.stopImmediatePropagation(); e.preventDefault(); }, { once: true, capture: true });
+          commitDrawing(item);
+        }
       };
-      node.addEventListener('pointermove',move);node.addEventListener('pointerup',end);node.addEventListener('pointercancel',end);
+      node.addEventListener("pointermove", move);
+      node.addEventListener("pointerup", end);
+      node.addEventListener("pointercancel", end);
     });
   }
+
+  /* ----------------------------------------------------- margin cards -- */
+  function itemAnchorY(item, sheet) {
+    if (item.type === "highlight") {
+      const bands = bandsFor(item, sheet);
+      if (bands && bands.length) return bands[0].y;
+    }
+    return (item.point && item.point.y) || 0;
+  }
+
+  function renderMarginCards(sheet) {
+    let layer = sheet.el.querySelector(":scope > .r-margin");
+    if (!state.marginMode) {
+      if (layer) layer.remove();
+      return;
+    }
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.className = "r-margin";
+      sheet.el.append(layer);
+    }
+    const items = (state.byPage.get(sheet.no) || []).filter(
+      (item) => (item.comment && item.comment.trim()) || item.type === "note" || item.type === "text"
+    );
+    layer.replaceChildren();
+    if (!items.length) return;
+    const sorted = items.slice().sort((a, b) => itemAnchorY(a, sheet) - itemAnchorY(b, sheet));
+    let bottom = -Infinity;
+    for (const item of sorted) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "r-mcard";
+      card.dataset.id = item.id;
+      card.style.setProperty("--mc", COLOR_HEX[item.color] || COLOR_HEX.yellow);
+      const top = Math.max(itemAnchorY(item, sheet) * state.scale - 10, bottom + 8, 2);
+      card.style.top = `${top}px`;
+      const kindLabel = { highlight: "高亮", note: "便签", text: "文字", ink: "画笔" }[item.type] || "批注";
+      const styleLabel =
+        item.type === "highlight"
+          ? ` · ${(HIGHLIGHT_STYLES.find((s) => s.id === (item.style || "marker")) || {}).label || ""}`
+          : "";
+      card.innerHTML =
+        `<span class="r-mcard-top"><span class="r-dotview" style="background:${
+          COLOR_HEX[item.color] || COLOR_HEX.yellow
+        }"></span>第 ${item.page} 页 · ${kindLabel}${styleLabel}</span>` +
+        (item.text ? `<p class="r-mcard-quote">${escapeHtml(item.text.slice(0, 120))}</p>` : "") +
+        (item.comment ? `<p class="r-mcard-note">${escapeHtml(item.comment.slice(0, 260))}</p>` : "");
+      card.addEventListener("click", () => focusAnnotation(item.id));
+      layer.append(card);
+      bottom = top + card.offsetHeight + 6;
+    }
+  }
+
+  /* --------------------------------------------------- sidebar resize -- */
+  function setupSidebarResize() {
+    const width = clamp(Number(readerPrefs.sidebarWidth) || 178, 160, 440);
+    el.sidebar.style.width = `${width}px`;
+    const handle = el.sideResize;
+    if (!handle) return;
+    let startX = 0;
+    let startWidth = 0;
+    let dragging = false;
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      dragging = true;
+      startX = event.clientX;
+      startWidth = el.sidebar.offsetWidth;
+      handle.classList.add("dragging");
+      document.body.classList.add("side-dragging");
+      handle.setPointerCapture(event.pointerId);
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      el.sidebar.style.width = `${clamp(startWidth + event.clientX - startX, 160, 440)}px`;
+    });
+    const stop = () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove("dragging");
+      document.body.classList.remove("side-dragging");
+      readerPrefs.sidebarWidth = el.sidebar.offsetWidth;
+      storePrefs();
+      if (state.fit) relayout(scrollAnchor());
+    };
+    handle.addEventListener("pointerup", stop);
+    handle.addEventListener("pointercancel", stop);
+    handle.addEventListener("dblclick", () => {
+      el.sidebar.style.width = "178px";
+      readerPrefs.sidebarWidth = 178;
+      storePrefs();
+      if (state.fit) relayout(scrollAnchor());
+    });
+  }
+
+  /* ------------------------------------------------------ stale server -- */
+  function showStaleBanner() {
+    state.serverStale = true;
+    if (!el.banner) return;
+    if (localStorage.getItem("babeldoc-reader-banner") === "off") return;
+    el.banner.hidden = false;
+  }
+  function pollRestart() {
+    let tries = 0;
+    const tick = async () => {
+      tries += 1;
+      try {
+        const health = await api("/api/health");
+        if (health && health.version === "1.4.0") {
+          window.location.reload();
+          return;
+        }
+      } catch {
+        /* the server is still down while it restarts */
+      }
+      if (tries < 40) window.setTimeout(tick, 700);
+      else toast("重启超时，请关闭应用窗口后重新打开", "bad");
+    };
+    window.setTimeout(tick, 900);
+  }
+
+  /* ------------------------------------------------------ reader tools -- */
   function setupReaderTools() {
+    dockState();
+    state.marginMode = readerPrefs.marginNotes === true;
+    document.body.classList.toggle("margin-notes", state.marginMode);
+    state.colorFilter = new Set(Array.isArray(readerPrefs.colorFilter) ? readerPrefs.colorFilter : []);
+
     window.addEventListener("beforeunload", (event) => {
       const active = state.items.find((item) => item.id === state.activeId);
-      if (savedRevision !== saveRevision || (active && el.editorText.value.trim() !== active.comment)) {
+      if (
+        savedRevision !== saveRevision ||
+        (active && el.editorText.value.trim() !== (active.comment || "")) ||
+        state.editingId
+      ) {
         event.preventDefault();
         event.returnValue = "";
       }
+    });
+
+    renderDock();
+    renderStyleButtons();
+    setupSidebarResize();
+
+    el.panelNotes.addEventListener("click", (event) => {
+      const chip = event.target.closest("[data-filter]");
+      if (!chip) return;
+      event.stopPropagation();
+      const value = chip.dataset.filter;
+      if (value === "all") state.colorFilter.clear();
+      else if (state.colorFilter.has(value)) state.colorFilter.delete(value);
+      else state.colorFilter.add(value);
+      readerPrefs.colorFilter = [...state.colorFilter];
+      storePrefs();
+      renderNotesList();
     });
 
     /* ------------------------------------------------------------ paper -- */
@@ -2614,7 +3223,7 @@
     };
     applyPaper();
 
-    el.toggleOriginal.addEventListener("click", () => {
+    function toggleOriginal() {
       if (!state.pdf || state.base.w <= state.base.h * 1.2) {
         toast("此开关适用于原文在左、译文在右的左右对照 PDF");
         return;
@@ -2622,10 +3231,11 @@
       originalVisible = !originalVisible;
       clearSync();
       closeEditor();
+      endTextEdit();
       hideSelectionToolbar();
       relayout(scrollAnchor());
       refreshDock();
-    });
+    }
 
     /* ----------------------------------------------------- colour tags -- */
     const labels = {
@@ -2655,37 +3265,53 @@
     control("color-hints").onchange = updateHints;
     updateHints();
 
-    api("/api/fonts")
-      .then((data) => {
-        for (const font of data.fonts || []) {
-          if (![...control("text-font").options].some((o) => o.value === font)) {
-            control("text-font").add(new Option(font));
-          }
-        }
-      })
-      .catch(() => {});
-
+    /* ------------------------------------------------------- controls -- */
+    function applyControlChange(id) {
+      refreshDock();
+      const item = state.items.find((entry) => entry.id === state.activeId);
+      if (!item) return;
+      if (item.type === "highlight") {
+        item.style = control("highlight-style").value;
+        commitDrawing(item);
+        return;
+      }
+      if (!["text", "ink"].includes(item.type)) return;
+      /* Text edits take one property at a time: assigning every drawing option
+         would reset the text colour from the ink swatch. */
+      if (item.type === "text" && state.editingId === item.id) {
+        if (id === "text-font") item.fontFamily = control("text-font").value;
+        else if (id === "text-size") item.fontSize = clamp(+control("text-size").value || 18, 8, 96);
+        else if (id === "ink-color") item.inkColor = control("ink-color").value;
+        else if (id === "ink-opacity") item.opacity = +control("ink-opacity").value / 100;
+        else if (id === "ink-width") item.width = clamp(+control("ink-width").value || 2, 0.5, 30);
+        const node = textNode(item.id);
+        if (node) applyTextStyle(node, item);
+        item.updated = Date.now() / 1000;
+        updateTextbar();
+        persist();
+        return;
+      }
+      Object.assign(item, drawingOptions());
+      commitDrawing(item);
+    }
+    for (const id of ["ink-color", "ink-width", "ink-opacity", "text-font", "text-size", "highlight-style"]) {
+      control(id).addEventListener("input", () => applyControlChange(id));
+    }
     control("draw-tool").onchange = () => {
       closeEditor();
       setDrawingTool(control("draw-tool").value);
     };
-    for (const id of ["ink-color", "ink-width", "ink-opacity", "text-font", "text-size", "highlight-style"]) {
-      control(id).oninput = () => {
-        const item = state.items.find((a) => a.id === state.activeId);
-        if (!item) return;
-        if (item.type === "highlight") item.style = control("highlight-style").value;
-        else if (["text", "ink"].includes(item.type)) Object.assign(item, drawingOptions());
-        commitDrawing(item);
-      };
-    }
-    control("ink-color").addEventListener("input", refreshDock);
     el.noteTool.addEventListener("click", refreshDock);
+
+    /* ------------------------------------------------------ text bar -- */
+    setupTextbar();
 
     /* ------------------------------------------------------ popovers -- */
     let popAnchor = null;
     function closePopover() {
       if (!el.pop || el.pop.hidden) return;
       el.pop.hidden = true;
+      delete el.pop.dataset.kind;
       if (popAnchor) popAnchor.setAttribute("aria-expanded", "false");
       popAnchor = null;
     }
@@ -2702,21 +3328,24 @@
     }
     function openPopover(kind, anchor) {
       if (!el.pop || !anchor) return;
-      if (popAnchor === anchor && !el.pop.hidden) {
+      if (popAnchor === anchor && !el.pop.hidden && el.pop.dataset.kind === kind) {
         closePopover();
         return;
       }
       if (popAnchor) popAnchor.setAttribute("aria-expanded", "false");
       popAnchor = anchor;
       anchor.setAttribute("aria-expanded", "true");
+      el.pop.dataset.kind = kind;
       renderPopover(kind);
       el.pop.hidden = false;
+      el.pop.scrollTop = 0;
       positionPopover(anchor);
     }
     function renderPopover(kind) {
       if (kind === "ink") return renderInkPopover();
-      if (kind === "text") return renderTextPopover();
+      if (kind === "font") return renderFontPopover();
       if (kind === "paper") return renderPaperPopover();
+      if (kind === "settings") return renderSettingsPopover();
       return renderLegendPopover();
     }
 
@@ -2779,25 +3408,65 @@
       });
     }
 
-    function renderTextPopover() {
+    const FONT_SOURCE = { imported: "导入", bundled: "内置", system: "系统" };
+    function renderFontPopover() {
+      const current = control("text-font").value || "sans-serif";
       el.pop.innerHTML =
-        '<p class="r-pop-title">字体与字号</p>' +
-        '<p class="r-pop-sub">用于「页面文字」工具输入的文字。</p>' +
-        '<label class="r-pop-row"><span>字体</span><select id="pop-font"></select></label>' +
-        '<label class="r-pop-row"><span>字号</span><input id="pop-size" type="number" min="8" max="96"></label>';
-      const select = el.pop.querySelector("#pop-font");
-      select.replaceChildren(...[...control("text-font").options].map((option) => new Option(option.value, option.value)));
-      select.value = control("text-font").value;
-      select.addEventListener("change", () => {
-        control("text-font").value = select.value;
+        '<p class="r-pop-title">字体</p>' +
+        '<p class="r-pop-sub">可用系统字体，也可以导入自己的字体文件。</p>' +
+        '<div class="r-pop-search"><svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">' +
+        ICONS.search +
+        '</svg><input id="pop-font-search" placeholder="搜索字体" spellcheck="false"></div>' +
+        '<div class="r-pop-fontlist" id="pop-fontlist"></div>' +
+        '<button class="r-pop-btn" id="pop-font-import" type="button">导入字体文件（.ttf / .otf / .ttc）</button>';
+      const list = el.pop.querySelector("#pop-fontlist");
+      const search = el.pop.querySelector("#pop-font-search");
+      const rows = [];
+      for (const font of BUILTIN_FONTS) {
+        rows.push({ css: font.css, label: font.label, source: "builtin" });
+      }
+      for (const font of FONTS.list) rows.push(font);
+      const paint = (query) => {
+        const needle = query.trim().toLowerCase();
+        const matches = rows.filter(
+          (font) => !needle || String(font.label || font.family || "").toLowerCase().includes(needle)
+        );
+        /* Every previewed row asks the browser to load a local font file, so a
+           list of 300+ families is capped; typing a name searches them all. */
+        const limit = 48;
+        const shown = matches.slice(0, limit);
+        const html = shown
+          .map(
+            (font) =>
+              `<button type="button" class="r-font-row${font.css === current ? " on" : ""}" data-css="${escapeHtml(
+                font.css
+              )}" data-source="${font.source}"><span>${escapeHtml(font.label || font.family)}</span>` +
+              `<small>${FONT_SOURCE[font.source] || ""}</small></button>`
+          )
+          .join("");
+        list.innerHTML =
+          (html || '<p class="r-pop-note">没有匹配的字体</p>') +
+          (matches.length > limit
+            ? `<p class="r-pop-note">还有 ${matches.length - limit} 个字体，输入名称可以继续查找。</p>`
+            : "");
+        for (const row of list.querySelectorAll(".r-font-row")) {
+          row.style.fontFamily = fontStack(row.dataset.css);
+        }
+      };
+      paint("");
+      search.addEventListener("input", () => paint(search.value));
+      list.addEventListener("click", (event) => {
+        const row = event.target.closest("[data-css]");
+        if (!row) return;
+        control("text-font").value = row.dataset.css;
         control("text-font").dispatchEvent(new Event("input", { bubbles: true }));
+        for (const other of list.querySelectorAll(".r-font-row")) other.classList.toggle("on", other === row);
+        updateTextbar();
+        if (state.editingId) focusText(state.editingId);
       });
-      const size = el.pop.querySelector("#pop-size");
-      size.value = control("text-size").value;
-      size.addEventListener("input", () => {
-        if (!size.value) return;
-        control("text-size").value = size.value;
-        control("text-size").dispatchEvent(new Event("input", { bubbles: true }));
+      el.pop.querySelector("#pop-font-import").addEventListener("click", () => el.fontUpload.click());
+      el.pop.querySelector("#pop-fontlist").addEventListener("mousedown", (event) => {
+        if (event.target.closest("button")) event.preventDefault();
       });
     }
 
@@ -2854,11 +3523,17 @@
         '<p class="r-pop-title">颜色标签</p>' +
         '<p class="r-pop-sub">给每种颜色写一句用途说明，鼠标停在色点上就能看到。</p>' +
         `<div class="r-pop-list">${rows}</div>` +
-        '<label class="r-pop-check"><input type="checkbox" id="pop-hints"> 显示功能提示</label>';
+        '<label class="r-pop-check"><input type="checkbox" id="pop-hints"> 显示功能提示</label>' +
+        '<div class="r-settings-block"><span class="r-settings-label">批注显示</span>' +
+        '<div class="r-segmented" id="pop-layout">' +
+        `<button type="button" data-layout="page" class="${state.marginMode ? "" : "on"}">页面内</button>` +
+        `<button type="button" data-layout="margin" class="${state.marginMode ? "on" : ""}">页边距</button>` +
+        "</div></div>";
       for (const input of el.pop.querySelectorAll("[data-legend]")) {
         input.addEventListener("input", () => {
           labels[input.dataset.legend] = input.value;
           updateHints();
+          renderNotesList();
         });
       }
       const hints = el.pop.querySelector("#pop-hints");
@@ -2867,6 +3542,101 @@
         control("color-hints").checked = hints.checked;
         updateHints();
       });
+      el.pop.querySelector("#pop-layout").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-layout]");
+        if (!button) return;
+        state.marginMode = button.dataset.layout === "margin";
+        applyMarginMode(button.dataset.layout === "margin");
+        for (const other of el.pop.querySelectorAll("[data-layout]")) other.classList.toggle("on", other === button);
+      });
+    }
+
+    function renderSettingsPopover() {
+      const prefs = dockState();
+      const hidden = new Set(prefs.hidden);
+      const seen = new Set();
+      const short = {
+        erase: "橡皮擦",
+        ink: "墨色与粗细",
+        paper: "纸面颜色",
+        original: "左侧原文",
+        legend: "颜色标签",
+        settings: "工具栏设置",
+      };
+      const rows = [];
+      for (const id of prefs.order) {
+        if (id === "|" || seen.has(id) || !DOCK_ITEMS[id]) continue;
+        seen.add(id);
+        const item = DOCK_ITEMS[id];
+        rows.push(
+          `<div class="r-settings-row" data-row="${id}">` +
+            `<span class="r-settings-icon">${icon(item.icon, 16)}</span>` +
+            `<span class="r-settings-name">${short[id] || item.label}</span>` +
+            `<button class="r-settings-move" type="button" data-move="${id}" data-dir="-1" title="上移" aria-label="上移">↑</button>` +
+            `<button class="r-settings-move" type="button" data-move="${id}" data-dir="1" title="下移" aria-label="下移">↓</button>` +
+            `<label class="r-switch"><input type="checkbox" data-visible="${id}" ${
+              hidden.has(id) ? "" : "checked"
+            }><i></i></label>` +
+            "</div>"
+        );
+      }
+      el.pop.innerHTML =
+        '<p class="r-settings-title">工具栏</p>' +
+        '<p class="r-settings-sub">用 ↑ ↓ 调整顺序，开关控制显示。设置只保存在这台设备上。</p>' +
+        `<div class="r-settings-list">${rows.join("")}</div>` +
+        '<div class="r-settings-block"><span class="r-settings-label">批注显示</span>' +
+        '<div class="r-segmented" id="pop-layout">' +
+        `<button type="button" data-layout="page" class="${state.marginMode ? "" : "on"}">页面内</button>` +
+        `<button type="button" data-layout="margin" class="${state.marginMode ? "on" : ""}">页边距</button>` +
+        "</div></div>" +
+        '<button class="r-pop-btn" type="button" id="pop-dock-reset">恢复默认工具栏</button>';
+      el.pop.querySelector(".r-settings-list").addEventListener("click", (event) => {
+        const move = event.target.closest("[data-move]");
+        if (move) {
+          moveDockItem(move.dataset.move, Number(move.dataset.dir));
+          return;
+        }
+      });
+      for (const input of el.pop.querySelectorAll("[data-visible]")) {
+        input.addEventListener("change", () => {
+          const id = input.dataset.visible;
+          const set = new Set(dockState().hidden);
+          if (input.checked) set.delete(id);
+          else set.add(id);
+          readerPrefs.dock.hidden = [...set];
+          storePrefs();
+          renderDock();
+        });
+      }
+      el.pop.querySelector("#pop-layout").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-layout]");
+        if (!button) return;
+        state.marginMode = button.dataset.layout === "margin";
+        applyMarginMode(button.dataset.layout === "margin");
+        for (const other of el.pop.querySelectorAll("[data-layout]")) other.classList.toggle("on", other === button);
+      });
+      el.pop.querySelector("#pop-dock-reset").addEventListener("click", () => {
+        readerPrefs.dock = { order: [...DOCK_DEFAULT], hidden: [] };
+        storePrefs();
+        renderDock();
+        renderSettingsPopover();
+      });
+    }
+
+    function moveDockItem(id, direction) {
+      const order = dockState().order;
+      const items = order.filter((entry) => entry !== "|");
+      const from = items.indexOf(id);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= items.length) return;
+      const other = items[to];
+      const a = order.indexOf(id);
+      const b = order.indexOf(other);
+      order[a] = other;
+      order[b] = id;
+      storePrefs();
+      renderDock();
+      renderSettingsPopover();
     }
 
     document.addEventListener(
@@ -2879,12 +3649,15 @@
       },
       true
     );
+    el.pop.addEventListener("mousedown", (event) => event.stopPropagation());
 
     /* ------------------------------------------------------------ dock -- */
     if (el.dock) {
       el.dock.addEventListener("mousedown", (event) => event.stopPropagation());
-      for (const button of el.dock.querySelectorAll("[data-tool]")) {
-        button.addEventListener("click", () => {
+      el.dock.addEventListener("click", (event) => {
+        const button = event.target.closest("button");
+        if (!button) return;
+        if (button.dataset.tool) {
           closePopover();
           const tool = button.dataset.tool;
           if (tool === "note") {
@@ -2899,23 +3672,56 @@
             return;
           }
           setDrawingTool(tool);
-        });
-      }
-      control("dock-ink").addEventListener("click", () => openPopover("ink", control("dock-ink")));
-      control("dock-text").addEventListener("click", () => openPopover("text", control("dock-text")));
-      control("dock-paper").addEventListener("click", () => openPopover("paper", control("dock-paper")));
-      control("dock-legend").addEventListener("click", () => openPopover("legend", control("dock-legend")));
-    }
-    el.pop.addEventListener("mousedown", (event) => event.stopPropagation());
-    for (const button of $$("button[data-style]")) {
-      button.addEventListener("click", (event) => {
-        event.stopPropagation();
-        setHighlightStyle(button.dataset.style);
+          return;
+        }
+        if (button.dataset.style) {
+          setHighlightStyle(button.dataset.style);
+          return;
+        }
+        if (button.dataset.action) {
+          const action = button.dataset.action;
+          if (action === "original") {
+            toggleOriginal();
+            return;
+          }
+          if (action === "layout") {
+            toggleMarginMode();
+            return;
+          }
+          if (action === "ink" || action === "font" || action === "paper" || action === "legend" || action === "settings") {
+            openPopover(action, button);
+          }
+        }
       });
     }
-    refreshDock();
 
-    /* ----------------------------------------------------------- page -- */
+    /* ---------------------------------------------------- text bar UI -- */
+    function setupTextbar() {
+      if (!el.textbar) return;
+      el.textbar.addEventListener("mousedown", (event) => event.preventDefault());
+      const colors = el.textbar.querySelectorAll("[data-text-color]");
+      for (const dot of colors) {
+        dot.addEventListener("click", () => {
+          styleTextItem({ inkColor: dot.dataset.textColor });
+          for (const other of colors) other.classList.toggle("on", other === dot);
+        });
+      }
+      el.textbar.querySelector("#textbar-custom").addEventListener("input", (event) => {
+        styleTextItem({ inkColor: event.target.value });
+        for (const other of colors) other.classList.remove("on");
+      });
+      for (const button of el.textbar.querySelectorAll("[data-size]")) {
+        button.addEventListener("click", () => {
+          const item = state.items.find((entry) => entry.id === state.activeId);
+          if (!item) return;
+          styleTextItem({ fontSize: clamp(Math.round((item.fontSize || 18) + Number(button.dataset.size)), 8, 96) });
+        });
+      }
+      el.textbarFont.addEventListener("click", () => openPopover("font", el.textbarFont));
+      el.textbarDone.addEventListener("click", () => endTextEdit());
+    }
+
+    /* ----------------------------------------------------- page tools -- */
     let suppressPageClick = false;
     el.pages.addEventListener(
       "click",
@@ -2928,10 +3734,37 @@
       },
       true
     );
+    el.pages.addEventListener("input", (event) => {
+      const node = event.target.closest?.(".r-page-text.editing");
+      if (!node) return;
+      const item = state.items.find((entry) => entry.id === node.dataset.id);
+      if (!item) return;
+      item.comment = node.innerText;
+      item.updated = Date.now() / 1000;
+      node.dataset.placeholder = "";
+      persist();
+    });
+    el.pages.addEventListener("focusout", (event) => {
+      const node = event.target.closest?.(".r-page-text.editing");
+      if (!node) return;
+      window.setTimeout(() => {
+        if (!state.editingId || state.editingId !== node.dataset.id) return;
+        if (document.activeElement === node) return;
+        if (el.textbar && el.textbar.contains(document.activeElement)) return;
+        /* The font/colour popover belongs to the text editor: using it must
+           not commit and close the text being typed. */
+        if (el.pop && !el.pop.hidden) return;
+        endTextEdit();
+      }, 0);
+    });
     el.pages.addEventListener(
       "pointerdown",
       (event) => {
-        if (event.button !== 0 || drawingTool === "select") return;
+        if (event.button !== 0) return;
+        const target = event.target instanceof Element ? event.target : null;
+        if (state.editingId && target && target.closest(".r-page-text.editing")) return;
+        if (state.editingId) endTextEdit();
+        if (drawingTool === "select") return;
         const section = event.target.closest(".r-sheet");
         if (!section) return;
         const sheet = state.sheets[+section.dataset.page - 1];
@@ -2942,7 +3775,6 @@
         closeEditor();
         const start = pointToPage(sheet, event.clientX, event.clientY);
         if (drawingTool === "text") {
-          /* Placing text must never leave the sticky-note tool armed. */
           state.noteTool = false;
           el.noteTool.setAttribute("aria-pressed", "false");
           el.pages.classList.remove("note-mode");
@@ -2950,7 +3782,7 @@
           commitDrawing(item);
           setDrawingTool("select");
           suppressPageClick = true;
-          openEditor(item.id, event);
+          beginTextEdit(item.id);
           return;
         }
         if (drawingTool === "erase") {
@@ -3006,48 +3838,274 @@
       true
     );
 
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        closePopover();
-        if (state.noteTool) el.noteTool.click();
-        setDrawingTool("select");
-      }
-    });
+    /* --------------------------------------------------- context menu -- */
+    function menuAt(event) {
+      el.menu.hidden = false;
+      const box = el.menu.getBoundingClientRect();
+      let top = event.clientY;
+      if (top + box.height > window.innerHeight - 8) top = event.clientY - box.height;
+      el.menu.style.left = `${clamp(event.clientX, 8, window.innerWidth - box.width - 8)}px`;
+      el.menu.style.top = `${clamp(top, 8, window.innerHeight - box.height - 8)}px`;
+    }
+    function styleMenuHtml() {
+      return HIGHLIGHT_STYLES.map(
+        (style) =>
+          `<button type="button" class="r-menu-style" data-menu-style="${style.id}">${icon(
+            style.icon,
+            15
+          )}<span>${style.label}</span></button>`
+      ).join("");
+    }
+    function showSelectionMenu(event, captured) {
+      el.menu.className = "r-menu r-menu-rich";
+      el.menu.innerHTML =
+        `<div class="r-menu-title"><span>标记所选文字</span><span>${captured.text.length} 字</span></div>` +
+        `<div class="r-menu-styles">${styleMenuHtml()}</div>` +
+        `<div class="r-menu-colors">${Object.keys(COLOR_HEX)
+          .map(
+            (color) =>
+              `<button class="r-dot ${color}" type="button" data-menu-color="${color}" title="${COLOR_LABEL[color]}"></button>`
+          )
+          .join("")}</div>` +
+        '<hr class="r-menu-hr">' +
+        `<button type="button" class="r-menu-item" data-menu-act="note">${icon("note", 14)}写批注…</button>` +
+        `<button type="button" class="r-menu-item" data-menu-act="copy">${icon("copy", 14)}复制文字</button>`;
+      menuAt(event);
+      el.menu.onclick = (click) => {
+        const styleButton = click.target.closest("[data-menu-style]");
+        const colorButton = click.target.closest("[data-menu-color]");
+        const action = click.target.closest("[data-menu-act]");
+        if (styleButton) {
+          const style = styleButton.dataset.menuStyle;
+          setHighlightStyle(style);
+          const item = highlightSelection("yellow", style);
+          if (item) {
+            el.menu.hidden = true;
+            toast("已高亮所选文字", "good");
+          }
+          return;
+        }
+        if (colorButton) {
+          const item = highlightSelection(colorButton.dataset.menuColor);
+          if (item) {
+            el.menu.hidden = true;
+            toast("已高亮所选文字", "good");
+          }
+          return;
+        }
+        if (!action) return;
+        if (action.dataset.menuAct === "copy") {
+          navigator.clipboard.writeText(captured.text).then(
+            () => toast("已复制选中文字", "good"),
+            () => toast("复制失败，请使用 Ctrl+C", "bad")
+          );
+          el.menu.hidden = true;
+          return;
+        }
+        const item = highlightSelection("pink");
+        el.menu.hidden = true;
+        if (item) openEditor(item.id, event);
+      };
+    }
+    function showAnnotationMenu(event, item) {
+      el.menu.className = "r-menu r-menu-rich";
+      el.menu.innerHTML =
+        `<div class="r-menu-title"><span>第 ${item.page} 页 · ${
+          { highlight: "高亮", note: "便签", text: "文字", ink: "画笔" }[item.type] || "批注"
+        }</span></div>` +
+        (item.type === "text"
+          ? `<button type="button" class="r-menu-item" data-menu-act="edit">${icon("edit", 14)}编辑文字</button>`
+          : `<button type="button" class="r-menu-item" data-menu-act="edit">${icon("edit", 14)}打开批注</button>`) +
+        (item.type === "highlight"
+          ? `<div class="r-menu-colors">${Object.keys(COLOR_HEX)
+              .map(
+                (color) =>
+                  `<button class="r-dot ${color}" type="button" data-menu-color="${color}" title="${COLOR_LABEL[color]}"></button>`
+              )
+              .join("")}</div>`
+          : "") +
+        `<button type="button" class="r-menu-item" data-menu-act="delete">${icon("trash", 14)}删除</button>`;
+      menuAt(event);
+      el.menu.onclick = (click) => {
+        const color = click.target.closest("[data-menu-color]");
+        if (color) {
+          item.color = color.dataset.menuColor;
+          item.updated = Date.now() / 1000;
+          persist();
+          refreshAnnotations(pagesOfItem(item));
+          renderNotesList();
+          el.menu.hidden = true;
+          return;
+        }
+        const action = click.target.closest("[data-menu-act]");
+        if (!action) return;
+        el.menu.hidden = true;
+        if (action.dataset.menuAct === "delete") removeAnnotation(item.id);
+        else if (item.type === "text") beginTextEdit(item.id);
+        else openEditor(item.id, event);
+      };
+    }
+    function showToolMenu(event) {
+      el.menu.className = "r-menu r-menu-rich";
+      el.menu.innerHTML =
+        '<div class="r-menu-title"><span>工具</span></div>' +
+        ["select", "text", "note", "pen", "line"]
+          .map((id) => {
+            const item = DOCK_ITEMS[id];
+            return `<button type="button" class="r-menu-item" data-menu-tool="${id}">${icon(
+              item.icon,
+              14
+            )}${item.label}</button>`;
+          })
+          .join("");
+      menuAt(event);
+      el.menu.onclick = (click) => {
+        const button = click.target.closest("[data-menu-tool]");
+        if (!button) return;
+        el.menu.hidden = true;
+        const tool = button.dataset.menuTool;
+        if (tool === "note") {
+          if (!state.noteTool) el.noteTool.click();
+        } else setDrawingTool(tool);
+      };
+    }
+
     document.addEventListener("contextmenu", (event) => {
-      if (event.target.closest("input,textarea,[contenteditable=true]")) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      if (target.closest("input, textarea, [contenteditable=true], .r-page-text.editing")) return;
+      if (!target.closest(".r-page, .r-anno, .r-note, .r-note-badge, .r-ink")) return;
       event.preventDefault();
       closeMenu();
       closePopover();
-      const choices = [
-        ["select", "选择 / 移动"],
-        ["note", "便签"],
-        ["text", "页面文字"],
-        ["pen", "自由画"],
-        ["line", "直线"],
-        ["erase", "橡皮擦（整笔）"],
-      ];
-      el.menu.replaceChildren();
-      for (const [tool, label] of choices) {
-        const button = document.createElement("button");
-        button.textContent = label;
-        button.type = "button";
-        button.onclick = () => {
-          closeMenu();
-          if (tool === "note") {
-            if (!state.noteTool) el.noteTool.click();
-          } else {
-            setDrawingTool(tool);
-          }
-        };
-        el.menu.append(button);
+      const selection = window.getSelection();
+      const captured =
+        selection && !selection.isCollapsed && selection.rangeCount ? captureSelection() : null;
+      if (captured) {
+        state.pending = captured;
+        if (el.selToolbar && !el.selToolbar.hidden) el.selToolbar.hidden = true;
+        showSelectionMenu(event, captured);
+        return;
       }
-      el.menu.hidden = false;
-      const box = el.menu.getBoundingClientRect();
-      el.menu.style.left = `${clamp(event.clientX, 8, innerWidth - box.width - 8)}px`;
-      el.menu.style.top = `${clamp(event.clientY, 8, innerHeight - box.height - 8)}px`;
+      const hit = target.closest("[data-id]");
+      if (hit) {
+        const item = state.items.find((entry) => entry.id === hit.dataset.id);
+        if (item) {
+          showAnnotationMenu(event, item);
+          return;
+        }
+      }
+      showToolMenu(event);
     });
+    el.menu.addEventListener("mousedown", (event) => event.preventDefault());
+    document.addEventListener("mousedown", (event) => {
+      if (el.menu.hidden) return;
+      if (event.target.closest(".r-menu")) return;
+      if (event.target.closest("#btn-export")) return;
+      closeMenu();
+    });
+
+    /* -------------------------------------------------------- toolbar -- */
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && state.editingId) {
+        event.preventDefault();
+        endTextEdit();
+        return;
+      }
+      if (state.editingId) return;
+      const tag = (event.target.tagName || "").toLowerCase();
+      if (["input", "textarea", "select"].includes(tag) || event.target.isContentEditable) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const map = { v: "select", t: "text", n: "note", p: "pen", l: "line", e: "erase" };
+      const tool = map[event.key.toLowerCase()];
+      if (!tool) return;
+      event.preventDefault();
+      if (tool === "note") {
+        if (!state.noteTool) el.noteTool.click();
+      } else setDrawingTool(tool);
+    });
+
+    /* ------------------------------------------------------- banner -- */
+    if (el.banner) {
+      el.bannerClose.addEventListener("click", () => {
+        el.banner.hidden = true;
+        localStorage.setItem("babeldoc-reader-banner", "off");
+      });
+      el.bannerRestart.addEventListener("click", async () => {
+        el.bannerRestart.disabled = true;
+        el.bannerRestart.textContent = "正在重启…";
+        try {
+          await api("/api/app/restart", { method: "POST" });
+          pollRestart();
+        } catch {
+          el.bannerRestart.disabled = false;
+          el.bannerRestart.textContent = "重启应用";
+          toast("当前正在运行的版本不支持一键重启，请关闭应用窗口后重新打开", "bad");
+        }
+      });
+    }
+    api("/api/health")
+      .then((health) => {
+        const features = Array.isArray(health.features) ? health.features : [];
+        if (!features.includes("ink") || !features.includes("text")) showStaleBanner();
+      })
+      .catch(() => {});
+
+    if (el.fontUpload) {
+      el.fontUpload.addEventListener("change", async () => {
+        const file = el.fontUpload.files && el.fontUpload.files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append("file", file);
+        try {
+          const response = await fetch("/api/fonts/upload", { method: "POST", body: form });
+          const data = await response.json().catch(() => null);
+          if (!response.ok) throw new Error((data && data.error) || "导入字体失败");
+          await loadFonts();
+          if (data && data.font && data.font.css) {
+            control("text-font").value = data.font.css;
+            control("text-font").dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          toast(`已导入字体：${(data && data.font && data.font.label) || file.name}`, "good");
+          if (el.pop && !el.pop.hidden && el.pop.dataset.kind === "font") renderFontPopover();
+        } catch (error) {
+          toast(error.message || "导入字体失败", "bad");
+        } finally {
+          el.fontUpload.value = "";
+        }
+      });
+    }
+
+    loadFonts();
+    setupPageNoteTool();
+    refreshDock();
   }
 
+  function renderStyleButtons() {
+    const markup = HIGHLIGHT_STYLES.map(
+      (style) =>
+        `<button type="button" class="r-style-btn" data-style="${style.id}" title="${style.label}" aria-label="${style.label}" aria-pressed="false">${icon(style.icon, 13)}</button>`
+    ).join("");
+    if (el.selStyles) el.selStyles.innerHTML = markup;
+    if (el.editorStyles) el.editorStyles.innerHTML = markup;
+    for (const host of [el.selStyles, el.editorStyles]) {
+      if (!host) continue;
+      host.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-style]");
+        if (!button) return;
+        event.stopPropagation();
+        setHighlightStyle(button.dataset.style);
+      });
+    }
+  }
+
+  function setupPageNoteTool() {
+    /* The hidden #btn-note-tool keeps the original toggling logic alive for
+       both the dock and the keyboard shortcut. */
+    el.noteTool.addEventListener("click", () => {
+      if (state.noteTool) endTextEdit();
+    });
+  }
   bindEvents();
   setupReaderTools();
   boot();

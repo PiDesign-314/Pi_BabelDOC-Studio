@@ -281,3 +281,26 @@ def test_drawing_fields_are_bounded():
     assert item['width'] == 30 and item['opacity'] == .05
     assert item['inkColor'] == '#30343b' and item['fontSize'] == 96
     assert item['points'] == [{'x':0,'y':0}]
+
+
+def test_new_highlight_styles_roundtrip(tmp_path, annotation_dir):
+    source = make_pdf(tmp_path / 'styles.pdf')
+    items = [
+        {'type':'highlight','page':1,'color':'green','style':'crayon',
+         'rects':[{'x':70,'y':86,'w':120,'h':14}]},
+        {'type':'highlight','page':1,'color':'blue','style':'wavy',
+         'rects':[{'x':70,'y':120,'w':120,'h':14}]},
+        {'type':'highlight','page':1,'color':'red','style':'hand',
+         'rects':[{'x':70,'y':154,'w':120,'h':14}]},
+    ]
+    stored = annotations.save(source, items)['items']
+    assert [item['style'] for item in stored] == ['crayon', 'wavy', 'hand']
+    # An unknown style must fall back instead of reaching the page.
+    assert annotations._sanitize([{'type':'highlight','page':1,'style':'sparkle',
+                                  'rects':[{'x':1,'y':1,'w':2,'h':2}]}])[0]['style'] == 'marker'
+
+    result = pdfexport.export(source, stored)
+    with pymupdf.open(result['path']) as document:
+        types = [annot.type[0] for annot in document[0].annots()]
+    # marker-like styles export as highlights, wavy as an underline
+    assert types == [8, 9, 8]
