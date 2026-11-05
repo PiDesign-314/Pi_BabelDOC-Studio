@@ -44,6 +44,10 @@
 
 ![八色高亮](docs/screenshots/reader-colors.png)
 
+读「左右对照」的双语 PDF 时，在哪一侧划词，另一侧同一段落对应的句子会同步亮起：
+
+![双语对照同步](docs/screenshots/reader-sync.png)
+
 术语库自带两套预设（人工智能、交互设计），一键添加即可让全文术语统一：
 
 ![术语库与预设](docs/screenshots/glossary.png)
