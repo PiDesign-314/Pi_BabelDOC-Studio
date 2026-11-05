@@ -13,55 +13,55 @@
 
 上传前只保留一个拖拽入口，界面按 Apple HIG 分组呈现：
 
-![入口界面](docs/screenshots/main-light.png)
+![入口界面](docs/screenshots/home-light.png)
 
 拖入 PDF 后只保留「文档 / 翻译设置摘要 / 输出」三组内容，长表单收进弹窗，点「修改」随时调整：
 
-![上传后的工作区](docs/screenshots/studio-work.png)
+![上传后的工作区](docs/screenshots/work-summary.png)
 
 开始翻译后，文件卡片显示名称、大小 / 页数、阶段进度条与已用时间；完成后显示结果文件：
 
-![翻译进度](docs/screenshots/progress.png)
+![翻译进度](docs/screenshots/progress-gpt4.png)
 
 翻译设置弹窗（语言、服务、版式、术语与高级选项都在这里；修改会自动保存）：
 
-![翻译设置弹窗](docs/screenshots/settings-advanced.png)
+![翻译设置弹窗](docs/screenshots/settings-modal.png)
 
 深色模式（右上角 ☀/☾ 按钮在 跟随系统 → 浅色 → 深色 之间切换）：
 
-![深色模式](docs/screenshots/main-dark.png)
+![深色模式](docs/screenshots/home-dark.png)
 
 翻译完成后进入「结果库」：左侧按合集分组，右侧一篇论文一张分组行，可搜索、排序、归类、重命名、清理：
 
-![结果库](docs/screenshots/library.png)
+![结果库](docs/screenshots/library-gpt4.png)
 
 点开就在应用内阅读，选中正文即可高亮；带备注的划线行尾有便签标志，鼠标悬停即可预览：
 
-![阅读与批注](docs/screenshots/reader.png)
+![阅读与批注](docs/screenshots/reader-gpt4.png)
 
 选中正文后可以用八种颜色标记，也可以原地改色；侧栏还能按颜色筛选批注：
 
-![八色高亮](docs/screenshots/reader-colors.png)
+![八色高亮](docs/screenshots/reader-colors-gpt4.png)
 
 阅读器底部是一条悬浮工具坞：工具、标记样式、墨色、字体、纸面、批注版式与「颜色标签」都收在这里，顺序和显隐可自定义：
 
-![阅读工具坞](docs/screenshots/reader-tools.png)
+![阅读工具坞](docs/screenshots/reader-tools-gpt4.png)
 
 划词后可以直接挑标记样式（荧光笔 / 蜡笔 / 手绘 / 实线划线 / 铅笔划线 / 波浪线），已有标记也能原地修改样式：
 
-![划词样式](docs/screenshots/reader-styles.png)
+![划词样式](docs/screenshots/reader-styles-gpt4.png)
 
 「页面文字」直接在页面上输入，底部格式条可以改颜色、字体（含本机字体与导入的手写体）和字号，不再弹出编辑窗口：
 
-![页面文字与字体](docs/screenshots/reader-text.png)
+![页面文字与字体](docs/screenshots/reader-text-gpt4.png)
 
 批注可以选择显示在页面内，或排到页面右侧的页边距里，适合精读与水墨屏：
 
-![页边距批注](docs/screenshots/reader-margin.png)
+![页边距批注](docs/screenshots/reader-margin-gpt4.png)
 
 读「左右对照」的双语 PDF 时，在哪一侧划词，另一侧同一段落对应的句子会同步亮起：
 
-![双语对照同步](docs/screenshots/reader-sync.png)
+![双语对照同步](docs/screenshots/reader-sync-gpt4.png)
 
 术语库自带两套预设（人工智能、交互设计），一键添加即可让全文术语统一：
 
