@@ -2479,7 +2479,7 @@
       if (!section) return;
       const sheet = state.sheets[Number(section.dataset.page) - 1];
       if (!sheet) return;
-      if (event.target.closest(".r-page-text, .r-ink, .r-margin")) return;
+      if (event.target.closest(".r-page-text, .r-ink, .r-margin, .r-text-frame")) return;
       if (window.getSelection() && !window.getSelection().isCollapsed) return;
       if (event.target.closest(".r-note")) return;
       if (state.editingId) endTextEdit();
@@ -2936,6 +2936,102 @@
   function textNode(id) {
     return document.querySelector(`.r-page-text[data-id="${id}"]`);
   }
+
+  /* Editing a text item shows a light frame with a move grip and a resize
+     grip.  Both write straight to PDF units, so the position/size survives
+     zoom and a reload. */
+  let textFrame = null;
+  function hideTextFrame() {
+    if (textFrame) textFrame.remove();
+    textFrame = null;
+  }
+  function positionTextFrame(id) {
+    if (!textFrame || textFrame.dataset.id !== id) return;
+    const node = textNode(id);
+    if (!node) return;
+    textFrame.style.left = `${node.offsetLeft}px`;
+    textFrame.style.top = `${node.offsetTop}px`;
+    textFrame.style.width = `${node.offsetWidth}px`;
+    textFrame.style.height = `${node.offsetHeight}px`;
+  }
+  function showTextFrame(item) {
+    hideTextFrame();
+    const sheet = state.sheets[item.page - 1];
+    if (!sheet) return;
+    const frame = document.createElement("div");
+    frame.className = "r-text-frame";
+    frame.dataset.id = item.id;
+    frame.innerHTML =
+      '<button class="r-text-move" type="button" title="拖动移动文字" aria-label="拖动移动文字"></button>' +
+      '<button class="r-text-resize" type="button" title="拖动调整文字大小" aria-label="拖动调整文字大小"></button>';
+    sheet.anno.append(frame);
+    textFrame = frame;
+    positionTextFrame(item.id);
+    const node = textNode(item.id);
+    if (!node) return;
+    const move = frame.querySelector(".r-text-move");
+    const resize = frame.querySelector(".r-text-resize");
+    for (const button of [move, resize]) {
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+    }
+
+    move.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const origin = { ...item.point };
+      move.setPointerCapture(event.pointerId);
+      const onMove = (e) => {
+        item.point = {
+          x: clamp(origin.x + (e.clientX - startX) / state.scale, 0, sheet.width / state.scale - 8),
+          y: clamp(origin.y + (e.clientY - startY) / state.scale, 0, sheet.height / state.scale - 8),
+        };
+        node.style.left = `${item.point.x * state.scale}px`;
+        node.style.top = `${item.point.y * state.scale}px`;
+        positionTextFrame(item.id);
+      };
+      const onUp = () => {
+        move.removeEventListener("pointermove", onMove);
+        move.removeEventListener("pointerup", onUp);
+        move.removeEventListener("pointercancel", onUp);
+        item.updated = Date.now() / 1000;
+        persist();
+      };
+      move.addEventListener("pointermove", onMove);
+      move.addEventListener("pointerup", onUp);
+      move.addEventListener("pointercancel", onUp);
+    });
+
+    resize.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const startY = event.clientY;
+      const startSize = item.fontSize || 18;
+      resize.setPointerCapture(event.pointerId);
+      const onMove = (e) => {
+        const delta = (e.clientY - startY) / state.scale;
+        const next = clamp(Math.round(startSize + delta * 0.62), 8, 96);
+        if (next === item.fontSize) return;
+        item.fontSize = next;
+        node.style.fontSize = `${next * state.scale}px`;
+        positionTextFrame(item.id);
+        updateTextbar();
+      };
+      const onUp = () => {
+        resize.removeEventListener("pointermove", onMove);
+        resize.removeEventListener("pointerup", onUp);
+        resize.removeEventListener("pointercancel", onUp);
+        item.updated = Date.now() / 1000;
+        persist();
+      };
+      resize.addEventListener("pointermove", onMove);
+      resize.addEventListener("pointerup", onUp);
+      resize.addEventListener("pointercancel", onUp);
+    });
+  }
   function beginTextEdit(id) {
     const item = state.items.find((entry) => entry.id === id);
     if (!item || item.type !== "text") return;
@@ -2959,6 +3055,7 @@
     node.spellcheck = false;
     node.textContent = item.comment || "";
     updateTextbar();
+    showTextFrame(item);
     requestAnimationFrame(() => focusText(id));
   }
   function focusText(id) {
@@ -2982,6 +3079,7 @@
       item.comment = node.innerText.replace(/\u00a0/g, " ").replace(/\n{3,}/g, "\n\n").trimEnd();
       item.updated = Date.now() / 1000;
     }
+    hideTextFrame();
     state.editingId = null;
     state.activeId = null;
     document.body.classList.remove("editing-text");
@@ -3020,6 +3118,7 @@
     item.updated = Date.now() / 1000;
     const node = textNode(item.id);
     if (node) applyTextStyle(node, item);
+    positionTextFrame(item.id);
     updateTextbar();
     persist();
   }
@@ -3419,6 +3518,7 @@
         else if (id === "ink-width") item.width = clamp(+control("ink-width").value || 2, 0.5, 30);
         const node = textNode(item.id);
         if (node) applyTextStyle(node, item);
+        positionTextFrame(item.id);
         item.updated = Date.now() / 1000;
         updateTextbar();
         persist();
@@ -3541,12 +3641,17 @@
       });
     }
 
-    const FONT_SOURCE = { imported: "导入", bundled: "内置", system: "系统" };
+    const FONT_SOURCE = { imported: "我安装的", bundled: "内置", system: "系统" };
     function renderFontPopover() {
       const current = control("text-font").value || "sans-serif";
       el.pop.innerHTML =
         '<p class="r-pop-title">字体</p>' +
-        '<p class="r-pop-sub">可用系统字体，也可以导入自己的字体文件。</p>' +
+        '<p class="r-pop-sub">按来源分类；也可以导入自己的 .ttf / .otf / .ttc。</p>' +
+        '<div class="r-font-tabs" id="pop-font-tabs" role="tablist" aria-label="字体来源">' +
+        '<button type="button" data-group="all" class="on">全部</button>' +
+        '<button type="button" data-group="installed">我安装的</button>' +
+        '<button type="button" data-group="system">系统</button>' +
+        "</div>" +
         '<div class="r-pop-search"><svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">' +
         ICONS.search +
         '</svg><input id="pop-font-search" placeholder="搜索字体" spellcheck="false"></div>' +
@@ -3554,40 +3659,61 @@
         '<button class="r-pop-btn" id="pop-font-import" type="button">导入字体文件（.ttf / .otf / .ttc）</button>';
       const list = el.pop.querySelector("#pop-fontlist");
       const search = el.pop.querySelector("#pop-font-search");
+      const tabs = el.pop.querySelector("#pop-font-tabs");
       const rows = [];
-      for (const font of BUILTIN_FONTS) {
-        rows.push({ css: font.css, label: font.label, source: "builtin" });
-      }
+      for (const font of BUILTIN_FONTS) rows.push({ css: font.css, label: font.label, source: "builtin" });
       for (const font of FONTS.list) rows.push(font);
+      const groups = [
+        { id: "installed", label: "我安装的", fonts: rows.filter((font) => font.source === "imported") },
+        { id: "builtin", label: "内置", fonts: rows.filter((font) => font.source === "builtin") },
+        { id: "system", label: "系统字体", fonts: rows.filter((font) => font.source === "system") },
+      ];
+      let group = "all";
+      const rowHtml = (font) =>
+        `<button type="button" class="r-font-row${font.css === current ? " on" : ""}" data-css="${escapeHtml(
+          font.css
+        )}" data-source="${font.source}"><span>${escapeHtml(font.label || font.family)}</span></button>`;
       const paint = (query) => {
         const needle = query.trim().toLowerCase();
-        const matches = rows.filter(
-          (font) => !needle || String(font.label || font.family || "").toLowerCase().includes(needle)
-        );
-        /* Every previewed row asks the browser to load a local font file, so a
-           list of 300+ families is capped; typing a name searches them all. */
-        const limit = 48;
-        const shown = matches.slice(0, limit);
-        const html = shown
-          .map(
-            (font) =>
-              `<button type="button" class="r-font-row${font.css === current ? " on" : ""}" data-css="${escapeHtml(
-                font.css
-              )}" data-source="${font.source}"><span>${escapeHtml(font.label || font.family)}</span>` +
-              `<small>${FONT_SOURCE[font.source] || ""}</small></button>`
-          )
-          .join("");
-        list.innerHTML =
-          (html || '<p class="r-pop-note">没有匹配的字体</p>') +
-          (matches.length > limit
-            ? `<p class="r-pop-note">还有 ${matches.length - limit} 个字体，输入名称可以继续查找。</p>`
-            : "");
+        const limit = 60;
+        let used = 0;
+        const parts = [];
+        for (const entry of groups) {
+          if (group !== "all" && group !== entry.id) continue;
+          const matches = entry.fonts.filter(
+            (font) => !needle || String(font.label || font.family || "").toLowerCase().includes(needle)
+          );
+          if (!matches.length) continue;
+          const take = matches.slice(0, Math.max(0, limit - used));
+          used += take.length;
+          if (!take.length) continue;
+          parts.push(`<p class="r-font-group">${entry.label}<span>${matches.length}</span></p>`);
+          parts.push(take.map(rowHtml).join(""));
+        }
+        if (!parts.length) {
+          list.innerHTML =
+            group === "installed"
+              ? '<p class="r-pop-note">还没有导入字体。用下面的按钮添加本机字体文件。</p>'
+              : '<p class="r-pop-note">没有匹配的字体</p>';
+        } else {
+          list.innerHTML =
+            parts.join("") +
+            (used >= limit ? `<p class="r-pop-note">只显示前 ${limit} 个字体，输入名称可搜索全部。</p>` : "");
+        }
         for (const row of list.querySelectorAll(".r-font-row")) {
           row.style.fontFamily = fontStack(row.dataset.css);
         }
       };
       paint("");
       search.addEventListener("input", () => paint(search.value));
+      tabs.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-group]");
+        if (!button) return;
+        group = button.dataset.group;
+        for (const other of tabs.querySelectorAll("[data-group]")) other.classList.toggle("on", other === button);
+        paint(search.value);
+        list.scrollTop = 0;
+      });
       list.addEventListener("click", (event) => {
         const row = event.target.closest("[data-css]");
         if (!row) return;
@@ -3875,6 +4001,7 @@
       item.comment = node.innerText;
       item.updated = Date.now() / 1000;
       node.dataset.placeholder = "";
+      positionTextFrame(item.id);
       persist();
     });
     el.pages.addEventListener("focusout", (event) => {
@@ -3884,9 +4011,10 @@
         if (!state.editingId || state.editingId !== node.dataset.id) return;
         if (document.activeElement === node) return;
         if (el.textbar && el.textbar.contains(document.activeElement)) return;
-        /* The font/colour popover belongs to the text editor: using it must
-           not commit and close the text being typed. */
+        /* The font/colour popover and the move/resize grips belong to the
+           text editor: using them must not commit and close the text. */
         if (el.pop && !el.pop.hidden) return;
+        if (textFrame && textFrame.contains(document.activeElement)) return;
         endTextEdit();
       }, 0);
     });
@@ -3895,7 +4023,7 @@
       (event) => {
         if (event.button !== 0) return;
         const target = event.target instanceof Element ? event.target : null;
-        if (state.editingId && target && target.closest(".r-page-text.editing")) return;
+        if (state.editingId && target && (target.closest(".r-page-text.editing") || target.closest(".r-text-frame"))) return;
         if (state.editingId) endTextEdit();
         if (drawingTool === "select") return;
         const section = event.target.closest(".r-sheet");

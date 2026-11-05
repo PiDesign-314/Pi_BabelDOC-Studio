@@ -1739,6 +1739,7 @@ input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
   50% { transform: translate3d(20px, -26px, 0) scale(1.09); }
 }
 
+.stage-entry { justify-items: center; }
 body[data-stage="entry"] .page-head { display: none; }
 body[data-stage="entry"] .content {
   justify-content: center;
@@ -1965,3 +1966,9 @@ body[data-stage="entry"] .stage-entry.stage-enter .hero-foot { animation: rise 0
   .stage-entry .hero-title { font-size: 25px; }
   .stage-entry .hero-drop { padding: 26px 18px 24px; border-radius: 22px; }
 }
+
+/* GitHub link in the home toolbar. */
+.topbar-github { width: 34px; height: 34px; border-radius: 10px; color: var(--text-2); text-decoration: none; }
+.topbar-github:hover { color: var(--text); background: var(--card-soft); }
+.topbar-github:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+

@@ -1421,3 +1421,124 @@ body.reader .toasts { bottom: 118px; }
   body.margin-notes .r-scroll { padding-right: 24px; }
   .r-margin { display: none; }
 }
+
+/* ================================================================== *
+ * 1.5 reader chrome: a true translucent top bar with the document
+ * title centred, and the page scrolling underneath the glass.
+ * ================================================================== */
+:root { --topbar-h: 54px; }
+.r-top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: var(--topbar-h);
+  min-height: var(--topbar-h);
+  padding: 0 16px;
+  z-index: 40;
+  background: color-mix(in srgb, var(--card) 54%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(185%);
+  backdrop-filter: blur(28px) saturate(185%);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--line-strong) 55%, transparent);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.26) inset;
+}
+.r-main { height: 100vh; }
+.r-side { padding-top: var(--topbar-h); }
+.r-scroll { padding-top: calc(20px + var(--topbar-h)); }
+.r-doc {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: max-content;
+  max-width: min(34vw, 460px);
+  padding: 0 10px;
+  text-align: center;
+  pointer-events: none;
+}
+.r-doc strong,
+.r-doc span { width: 100%; text-align: center; }
+.r-doc strong { font-size: 13px; }
+.r-tools { margin-left: auto; }
+@media (max-width: 1340px) {
+  .r-doc { max-width: min(22vw, 260px); }
+  .r-saved { display: none; }
+}
+@media (max-width: 1120px) {
+  .r-doc { max-width: 20vw; }
+  .r-doc span { display: none; }
+}
+@media (max-width: 940px) {
+  .r-doc { display: none; }
+  .r-top { justify-content: space-between; }
+}
+@media (max-width: 860px) {
+  .r-side { height: 100vh; }
+}
+
+/* Page-text edit frame: move grip top-left, resize grip bottom-right. */
+.r-text-frame {
+  position: absolute;
+  z-index: 5;
+  border: 1.2px dashed color-mix(in srgb, var(--blue) 70%, transparent);
+  border-radius: 4px;
+  pointer-events: none;
+}
+.r-text-frame button {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 2px solid var(--card);
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 1px 4px rgba(10, 132, 255, 0.45);
+  pointer-events: auto;
+  touch-action: none;
+}
+.r-text-frame button:hover { transform: scale(1.15); }
+.r-text-frame .r-text-move { left: -7px; top: -7px; cursor: grab; }
+.r-text-frame .r-text-resize { right: -7px; bottom: -7px; cursor: nwse-resize; }
+
+/* Figma-style font source tabs. */
+.r-font-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  margin: 2px 0 8px;
+  border-radius: 9px;
+  background: var(--card-soft);
+}
+.r-font-tabs button {
+  flex: 1;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.r-font-tabs button.on {
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(17, 17, 26, 0.12);
+}
+.r-font-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 10px 6px 3px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.r-font-group span { font-variant-numeric: tabular-nums; }
+
