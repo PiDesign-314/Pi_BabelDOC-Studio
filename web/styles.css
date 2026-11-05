@@ -2103,3 +2103,63 @@ body.settings-open { overflow: hidden; }
 
 /* Glossary sheet opened from the settings modal must sit above it. */
 #glossary-modal { z-index: 80; }
+
+
+/* Inline editable translation summary (work page). */
+.settings-summary { padding: 4px 0; }
+.summary-row {
+  align-items: center;
+  min-height: 48px;
+  padding: 8px 16px;
+  gap: 14px;
+}
+.summary-row > span {
+  min-width: 64px;
+  font-size: 13px;
+}
+.summary-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.summary-select,
+.summary-input {
+  width: auto;
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 30px 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background-color: var(--card-soft);
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+}
+.summary-select {
+  max-width: 190px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%238e8e93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.summary-input {
+  max-width: 200px;
+  flex: 1;
+  padding-right: 10px;
+  border-color: transparent;
+}
+.summary-select:hover,
+.summary-input:hover { border-color: var(--line-strong); background-color: var(--card); }
+.summary-select:focus,
+.summary-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background-color: var(--card); }
+.summary-select:disabled,
+.summary-input:disabled { opacity: 0.72; cursor: default; }
+.summary-arrow { color: var(--text-3); font-size: 12px; flex: none; }
+.summary-glossary { max-width: min(280px, 52vw); }
+@media (max-width: 720px) {
+  .summary-row { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .summary-controls { width: 100%; justify-content: flex-start; }
+}

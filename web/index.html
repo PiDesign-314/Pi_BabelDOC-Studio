@@ -127,13 +127,38 @@
       <section class="group" aria-labelledby="work-settings-title">
         <div class="group-head">
           <h2 class="group-title" id="work-settings-title">翻译设置</h2>
-          <button class="inline-action" id="open-settings" type="button">修改</button>
+          <button class="inline-action" id="open-settings" type="button">更多</button>
         </div>
         <div class="group-card settings-summary">
-          <div class="summary-row"><span>服务与模型</span><strong id="summary-provider">—</strong></div>
-          <div class="summary-row"><span>语言</span><strong id="summary-lang">—</strong></div>
-          <div class="summary-row"><span>版式</span><strong id="summary-dual">—</strong></div>
-          <div class="summary-row"><span>术语库</span><strong id="summary-glossary">—</strong></div>
+          <div class="summary-row">
+            <span>翻译服务</span>
+            <div class="summary-controls">
+              <select id="quick-provider" class="summary-select" aria-label="翻译服务"></select>
+              <input id="quick-model" class="summary-input" list="quick-model-options"
+                     placeholder="模型名称" spellcheck="false" autocomplete="off" aria-label="模型">
+              <datalist id="quick-model-options"></datalist>
+            </div>
+          </div>
+          <div class="summary-row">
+            <span>语言</span>
+            <div class="summary-controls">
+              <select id="quick-lang-in" class="summary-select" aria-label="源语言"></select>
+              <span class="summary-arrow">→</span>
+              <select id="quick-lang-out" class="summary-select" aria-label="目标语言"></select>
+            </div>
+          </div>
+          <div class="summary-row">
+            <span>版式</span>
+            <select id="quick-dual" class="summary-select" aria-label="双语版式">
+              <option value="side">左右对照</option>
+              <option value="alternate">交替页</option>
+              <option value="mono">仅译文</option>
+            </select>
+          </div>
+          <div class="summary-row">
+            <span>术语库</span>
+            <select id="quick-glossary" class="summary-select summary-glossary" aria-label="术语库"></select>
+          </div>
         </div>
       </section>
 

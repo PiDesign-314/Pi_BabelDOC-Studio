@@ -15,9 +15,9 @@
 
 ![入口界面](docs/screenshots/home-light.png)
 
-拖入 PDF 后只保留「文档 / 翻译设置摘要 / 输出」三组内容，长表单收进弹窗，点「修改」随时调整：
+拖入 PDF 后只保留「文档 / 翻译设置摘要 / 输出」三组内容；翻译服务、模型、语言、版式、术语库直接在摘要里修改，页面范围、API Key 等完整选项收进「更多」弹窗：
 
-![上传后的工作区](docs/screenshots/work-summary.png)
+![上传后的工作区（设置可直接修改）](docs/screenshots/work-inline.png)
 
 开始翻译后，文件卡片显示名称、大小 / 页数、阶段进度条与已用时间；完成后显示结果文件：
 
@@ -25,7 +25,7 @@
 
 翻译设置弹窗（语言、服务、版式、术语与高级选项都在这里；修改会自动保存）：
 
-![翻译设置弹窗](docs/screenshots/settings-modal.png)
+![「更多」里的完整设置](docs/screenshots/settings-modal.png)
 
 深色模式（右上角 ☀/☾ 按钮在 跟随系统 → 浅色 → 深色 之间切换）：
 

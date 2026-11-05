@@ -100,10 +100,13 @@
     settingsClose: $("#settings-close"),
     settingsCancel: $("#settings-cancel"),
     settingsDone: $("#settings-done"),
-    summaryProvider: $("#summary-provider"),
-    summaryLang: $("#summary-lang"),
-    summaryDual: $("#summary-dual"),
-    summaryGlossary: $("#summary-glossary"),
+    quickProvider: $("#quick-provider"),
+    quickModel: $("#quick-model"),
+    quickModelOptions: $("#quick-model-options"),
+    quickLangIn: $("#quick-lang-in"),
+    quickLangOut: $("#quick-lang-out"),
+    quickDual: $("#quick-dual"),
+    quickGlossary: $("#quick-glossary"),
   };
 
   /* ------------------------------------------------------------- theme -- */
@@ -266,12 +269,16 @@
       .join("");
     el.langOut.innerHTML = options;
     el.langIn.innerHTML = options;
+    el.quickLangOut.innerHTML = options;
+    el.quickLangIn.innerHTML = options;
   }
 
   function renderProviders() {
-    el.provider.innerHTML = state.boot.providers
+    const providerOptions = state.boot.providers
       .map((item) => `<option value="${item.id}">${item.name}</option>`)
       .join("");
+    el.provider.innerHTML = providerOptions;
+    el.quickProvider.innerHTML = providerOptions;
     state.providerModels = {};
     state.boot.providers.forEach((item) => {
       state.providerModels[item.id] = { models: item.models, base_url: item.base_url, hint: item.hint };
@@ -280,9 +287,11 @@
 
   function renderModelOptions(providerId) {
     const preset = state.providerModels[providerId] || { models: [] };
-    el.modelOptions.innerHTML = preset.models
+    const modelOptions = preset.models
       .map((name) => `<option value="${name}"></option>`)
       .join("");
+    el.modelOptions.innerHTML = modelOptions;
+    el.quickModelOptions.innerHTML = modelOptions;
   }
 
   function renderGlossarySelect() {
@@ -295,8 +304,10 @@
       )
       .join("");
     el.glossary.innerHTML = options;
+    el.quickGlossary.innerHTML = options;
     if (current && state.glossaries.some((g) => g.id === current)) {
       el.glossary.value = current;
+      el.quickGlossary.value = current;
     }
   }
 
@@ -487,13 +498,14 @@
   }
 
   function updateSettingsSummary() {
-    if (!el.summaryProvider) return;
-    const provider = optionLabel(el.provider) || "—";
-    const model = el.model.value.trim();
-    el.summaryProvider.textContent = model ? `${provider} · ${model}` : provider;
-    el.summaryLang.textContent = `${optionLabel(el.langIn) || "—"} → ${optionLabel(el.langOut) || "—"}`;
-    el.summaryDual.textContent = optionLabel(el.dualMode) || "—";
-    el.summaryGlossary.textContent = el.glossary.value ? optionLabel(el.glossary) : "不使用术语库";
+    if (!el.quickProvider) return;
+    el.quickProvider.value = el.provider.value;
+    el.quickModel.value = el.model.value;
+    el.quickModel.disabled = el.model.disabled;
+    el.quickLangIn.value = el.langIn.value;
+    el.quickLangOut.value = el.langOut.value;
+    el.quickDual.value = el.dualMode.value;
+    el.quickGlossary.value = el.glossary.value;
   }
 
   function syncProviderFields(providerId) {
@@ -501,6 +513,10 @@
     el.baseUrl.disabled = free;
     el.apiKey.disabled = free;
     el.model.disabled = free;
+    if (el.quickModel) {
+      el.quickModel.disabled = free;
+      el.quickModel.placeholder = free ? "内置 Google 翻译" : "模型名称";
+    }
     el.baseUrl.placeholder = free ? "内置免费接口，无需填写" : "https://…/v1";
     el.apiKey.placeholder = free ? "无需 API Key" : "sk-…";
     if (free) {
@@ -1194,6 +1210,28 @@
     bindDropTarget();
 
     el.provider.addEventListener("change", switchProvider);
+    el.quickProvider.addEventListener("change", () => {
+      el.provider.value = el.quickProvider.value;
+      switchProvider();
+      el.quickModel.value = el.model.value;
+      updateSettingsSummary();
+    });
+    el.quickModel.addEventListener("input", () => {
+      el.model.value = el.quickModel.value;
+      scheduleSave();
+    });
+    for (const [quick, modal] of [
+      [el.quickLangIn, el.langIn],
+      [el.quickLangOut, el.langOut],
+      [el.quickDual, el.dualMode],
+      [el.quickGlossary, el.glossary],
+    ]) {
+      quick.addEventListener("change", () => {
+        modal.value = quick.value;
+        scheduleSave();
+        updateSettingsSummary();
+      });
+    }
     if (el.openSettings) el.openSettings.addEventListener("click", openSettingsSheet);
     for (const node of [el.settingsClose, el.settingsCancel, el.settingsDone]) {
       if (node) node.addEventListener("click", closeSettingsSheet);
