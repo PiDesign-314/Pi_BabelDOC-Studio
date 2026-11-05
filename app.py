@@ -219,7 +219,7 @@ def bootstrap():
     return _json(
         {
             "app": "BabelDOC Studio",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "providers": [
                 {
                     "id": item["id"],
