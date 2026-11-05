@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from pathlib import Path
 
@@ -56,7 +57,7 @@ def _sanitize(items) -> list[dict]:
         if not isinstance(item, dict):
             continue
         kind = item.get("type")
-        if kind not in {"highlight", "note"}:
+        if kind not in {"highlight", "note", "text", "ink"}:
             continue
         color = item.get("color")
         rects = []
@@ -97,6 +98,13 @@ def _sanitize(items) -> list[dict]:
                 "type": kind,
                 "page": int(_number(item.get("page"), 1, 100000)),
                 "color": color if color in COLORS else "yellow",
+                "style": item.get("style") if item.get("style") in {"marker", "underline", "pencil"} else "marker",
+                "inkColor": item.get("inkColor") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(item.get("inkColor", ""))) else "#30343b",
+                "opacity": _number(item.get("opacity", 1), 0.05, 1),
+                "width": _number(item.get("width", 2), 0.5, 30),
+                "fontSize": _number(item.get("fontSize", 18), 8, 96),
+                "fontFamily": str(item.get("fontFamily") or "sans-serif")[:160],
+                "points": [{"x": _number(pt.get("x"), 0, 100000), "y": _number(pt.get("y"), 0, 100000)} for pt in list(item.get("points") or [])[:12000] if isinstance(pt, dict)],
                 "rects": rects,
                 "ranges": ranges,
                 "point": {

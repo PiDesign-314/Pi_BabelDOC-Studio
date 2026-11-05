@@ -248,7 +248,7 @@ body.reader {
 .r-scroll {
   position: relative;
   min-height: 100%;
-  padding: 20px 24px 56px;
+  padding: 20px 24px 112px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -663,4 +663,262 @@ body.reader {
 @media (max-width: 860px) {
   .r-side { position: absolute; z-index: 15; height: calc(100vh - 49px); box-shadow: var(--shadow-pop); }
   .r-main { position: relative; }
+}
+
+/* ------------------------------------------------- iOS-style tool dock -- */
+.r-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 7px;
+  border-radius: 24px;
+  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--card) 74%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 0.5px solid color-mix(in srgb, var(--line-strong) 70%, transparent);
+  box-shadow:
+    0 18px 46px rgba(17, 17, 26, 0.22),
+    0 1px 0 rgba(255, 255, 255, 0.4) inset;
+  z-index: 60;
+}
+.r-dock-group { display: flex; align-items: center; gap: 1px; }
+.r-dock-sep { width: 1px; height: 24px; margin: 0 6px; background: var(--line); }
+.r-dock-btn {
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text-2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.12s ease;
+}
+.r-dock-btn svg { width: 19px; height: 19px; display: block; }
+.r-dock-btn:hover { background: color-mix(in srgb, var(--text-2) 10%, transparent); color: var(--text); }
+.r-dock-btn:active { transform: scale(0.93); }
+.r-dock-btn.on { background: var(--blue); color: #fff; box-shadow: 0 4px 12px rgba(10, 132, 255, 0.32); }
+.r-dock-btn[disabled] { opacity: 0.35; cursor: default; }
+.r-dock-swatch { width: 40px; }
+.r-dock-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #30343b;
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 0 0.5px rgba(17, 17, 26, 0.22);
+  transition: transform 0.12s ease;
+}
+.r-dock-swatch:hover .r-dock-dot { transform: scale(1.08); }
+
+/* Paper colour is the page backdrop; the PDF image multiplies onto it, so the
+   paper is tinted without touching the marks. The e-ink filter is applied to
+   the page image only — highlights and ink stay coloured. */
+.r-page { background: var(--paper-color, #fff); isolation: isolate; }
+.r-page canvas { mix-blend-mode: multiply; }
+body[data-paper=ink] .r-page canvas { filter: grayscale(1) contrast(1.02) brightness(1.04); }
+body[data-paper=ink] .r-stage { background: #cfcfc8; }
+
+/* Style choices inside the selection toolbar and the annotation editor. */
+.r-sel-style, .r-editor-styles {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--card-soft);
+}
+.r-editor-styles {
+  height: 28px;
+  justify-content: flex-start;
+  padding: 2px 4px;
+}
+.r-editor-styles[hidden] { display: none; }
+.r-editor-style-label {
+  margin: 0 6px 0 2px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.r-style-btn {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.r-style-btn svg { width: 13px; height: 13px; display: block; }
+.r-style-btn:hover { background: color-mix(in srgb, var(--text-2) 10%, transparent); color: var(--text); }
+.r-style-btn.on { background: var(--blue); color: #fff; }
+.r-sel .r-style-btn { width: 24px; height: 24px; }
+
+/* Popovers (colour, type, paper, legend) float above the reader and never
+   clip against the toolbar. */
+.r-pop {
+  position: fixed;
+  z-index: 90;
+  width: 248px;
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  padding: 14px;
+  border-radius: 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+  animation: r-pop 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+.r-pop-title { margin: 0 0 2px; font-size: 13px; font-weight: 620; color: var(--text); }
+.r-pop-sub { margin: 0 0 10px; font-size: 11px; line-height: 1.5; color: var(--text-3); }
+.r-pop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 10px 0 2px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.r-pop-row input[type="range"] { flex: 1; min-width: 90px; accent-color: var(--blue); }
+.r-pop-row input[type="number"],
+.r-pop-row select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card-soft);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.r-pop-row input[type="number"] { width: 62px; text-align: center; }
+.r-pop-row select { max-width: 150px; }
+.r-pop-value { min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-3); }
+.r-pop-swatches { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.r-pop-swatch {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.r-pop-swatch:hover { transform: scale(1.08); }
+.r-pop-swatch.on { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--blue); }
+.r-pop-ink { border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, 0.65); box-shadow: 0 0 0 1px rgba(17, 17, 26, 0.18); }
+.r-pop-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.r-pop-paper { width: 32px; height: 32px; border-radius: 10px; border: 1px solid var(--line-strong); cursor: pointer; position: relative; }
+.r-pop-paper.on { box-shadow: 0 0 0 2px var(--card), 0 0 0 3.5px var(--blue); }
+.r-pop-choices { display: grid; gap: 1px; margin-top: 6px; }
+.r-pop-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+}
+.r-pop-choice:hover { background: var(--card-soft); }
+.r-pop-choice.on { background: color-mix(in srgb, var(--blue) 10%, transparent); }
+.r-pop-choice-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  border: 1px solid var(--line-strong);
+  flex: none;
+}
+.r-pop-choice-check { margin-left: auto; width: 14px; height: 14px; color: var(--blue); opacity: 0; }
+.r-pop-choice.on .r-pop-choice-check { opacity: 1; }
+.r-pop-list { display: grid; gap: 6px; margin-top: 10px; }
+.r-pop-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
+.r-pop-item input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card-soft);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.r-pop-check { display: flex; align-items: center; gap: 7px; margin-top: 12px; font-size: 12px; color: var(--text-2); }
+.r-pop-check input { accent-color: var(--blue); }
+
+.r-sheet.translation-only { overflow: hidden; }
+.r-sheet.translation-only .r-page { transform: translateX(-50%); }
+.r-mark[data-style=underline], .r-mark[data-style=pencil] { background: transparent; border-radius: 0; border-bottom: 2px solid var(--mark-color); box-sizing: border-box; }
+.r-mark[data-style=pencil] { border-bottom-style: dashed; border-bottom-width: 1.5px; }
+.r-page-text { position: absolute; pointer-events: auto; cursor: grab; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 300px; border: 0; background: transparent; padding: 0; text-align: left; line-height: 1.35; touch-action: none; }
+.r-note { touch-action: none; cursor: grab; }
+.r-ink { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.r-ink path { pointer-events: stroke; cursor: pointer; }
+.r-pages.drawing .r-text { pointer-events: none; }
+.r-pages.drawing { touch-action: none; user-select: none; cursor: crosshair; }
+.r-dot[data-hint] { position: relative; }
+.r-dot[data-hint]:hover:after, .r-dot[data-hint]:focus-visible:after {
+  content: attr(data-hint);
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: var(--bg-elevated);
+  color: var(--text);
+  padding: 5px 8px;
+  border-radius: 7px;
+  box-shadow: 0 2px 12px #0002;
+  font-size: 12px;
+}
+.r-editor:not([hidden]), .r-sel:not([hidden]), .r-menu:not([hidden]) { animation: reader-pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes reader-pop { from { opacity: 0; transform: translateY(5px) scale(0.98); } to { opacity: 1; transform: none; } }
+.r-btn { transition: background 0.16s, transform 0.16s; }
+.r-btn:active { transform: scale(0.96); }
+@media (prefers-reduced-motion: reduce) {
+  .r-editor, .r-sel, .r-menu, .r-btn, .r-note, .r-mark, .r-pop, .r-dock-btn { animation: none !important; transition: none !important; }
+}
+
+.r-menu > button { display: block; width: 100%; padding: 9px 14px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.r-menu > button:hover { background: var(--accent-soft); }
+
+/* Floating surfaces use the same translucent material as the dock. */
+.r-sel, .r-editor, .r-menu, .r-tip {
+  background: color-mix(in srgb, var(--card) 86%, transparent);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  backdrop-filter: blur(26px) saturate(180%);
+  border: 0.5px solid color-mix(in srgb, var(--line-strong) 65%, transparent);
+}
+.r-sel { border-radius: 14px; padding: 6px 8px; }
+.r-editor { border-radius: 18px; }
+.r-menu { border-radius: 14px; }
+.r-btn.wide { border-radius: 9px; }
+.r-top .r-group { background: color-mix(in srgb, var(--card) 66%, transparent); border-color: color-mix(in srgb, var(--line) 70%, transparent); }
+#btn-note-tool[aria-pressed="true"] { background: var(--blue); box-shadow: 0 4px 12px rgba(10, 132, 255, 0.32); }
+#btn-note-tool[aria-pressed="true"]:hover { background: color-mix(in srgb, var(--blue) 86%, #fff); }
+
+/* Toasts stay clear of the floating dock. */
+body.reader .toasts { bottom: 92px; }
+@media (max-width: 760px) {
+  .r-dock { gap: 0; padding: 5px; border-radius: 20px; }
+  .r-dock-btn { width: 34px; height: 34px; }
+  .r-dock-sep { margin: 0 3px; }
 }

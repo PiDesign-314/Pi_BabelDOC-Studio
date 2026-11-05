@@ -66,6 +66,9 @@ RATIO_RE = re.compile(r"(\d+)\s*/\s*(\d+)")
 def find_babeldoc(explicit: str = "") -> str | None:
     if explicit and Path(explicit).exists():
         return explicit
+    bundled = Path(__file__).resolve().parents[1] / "runtime" / "python.exe"
+    if bundled.exists():
+        return str(bundled)
     found = shutil.which("babeldoc")
     if found:
         return found
@@ -78,6 +81,12 @@ def find_babeldoc(explicit: str = "") -> str | None:
 _VERSION_CACHE: dict[str, str] = {}
 
 
+def _babeldoc_prefix(exe: str) -> list[str]:
+    if Path(exe).name.lower() == "python.exe":
+        return [exe, "-s", str(Path(__file__).resolve().parents[1] / "tools" / "babeldoc_cli.py")]
+    return [exe]
+
+
 def babeldoc_version(exe: str | None) -> str:
     if not exe:
         return ""
@@ -86,7 +95,7 @@ def babeldoc_version(exe: str | None) -> str:
         return cached
     try:
         out = subprocess.run(
-            [exe, "--version"],
+            _babeldoc_prefix(exe) + ["--version"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -124,8 +133,7 @@ def reference_prompt(base_prompt: str, lang_out: str) -> str:
 
 
 def build_command(cfg: dict, files: list[str], exe: str, pages: str | None = None) -> list[str]:
-    cmd = [
-        exe,
+    cmd = _babeldoc_prefix(exe) + [
         "--openai",
         "--openai-model", cfg["model"],
         "--openai-base-url", cfg["base_url"],

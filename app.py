@@ -62,6 +62,24 @@ def _error(message: str, status: int = 400):
     return jsonify({"error": message}), status
 
 
+@app.get("/api/fonts")
+def local_fonts():
+    """Enumerate installed font families without exposing local file paths."""
+    names = set()
+    if sys.platform == "win32":
+        import winreg
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            try:
+                with winreg.OpenKey(hive, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts") as key:
+                    for index in range(winreg.QueryInfoKey(key)[1]):
+                        name = winreg.EnumValue(key, index)[0]
+                        name = name.split(" (")[0]
+                        names.update(part.strip() for part in name.split(" & ") if part.strip())
+            except OSError:
+                pass
+    return jsonify({"fonts": sorted(names, key=str.casefold)})
+
+
 @app.after_request
 def _no_cache(response):
     if response.mimetype in {"text/html", "application/javascript", "text/css"}:
@@ -223,7 +241,7 @@ def bootstrap():
     return _json(
         {
             "app": "BabelDOC Studio",
-            "version": "1.1.1",
+            "version": "1.3.0",
             "providers": [
                 {
                     "id": item["id"],

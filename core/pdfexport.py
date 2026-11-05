@@ -14,6 +14,7 @@ at the top-left corner of the page, which is also PyMuPDF's page space.
 from __future__ import annotations
 
 import os
+import json
 import uuid
 from pathlib import Path
 
@@ -63,6 +64,14 @@ def default_target(source: str | Path) -> Path:
 
 def _color(item: dict) -> tuple[float, float, float]:
     return COLORS.get(str(item.get("color")), COLORS["yellow"])
+
+
+def _ink_color(item):
+    value = str(item.get("inkColor", "#30343b")).lstrip("#")
+    try:
+        return tuple(int(value[i:i+2], 16) / 255 for i in (0, 2, 4))
+    except ValueError:
+        return (0.19, 0.20, 0.23)
 
 
 def _clean_rects(item: dict, page: pymupdf.Page) -> list[pymupdf.Rect]:
@@ -119,7 +128,7 @@ def export(
             if not isinstance(item, dict):
                 continue
             kind = item.get("type")
-            if kind not in {"highlight", "note"}:
+            if kind not in {"highlight", "note", "text", "ink"}:
                 continue
             try:
                 number = int(item.get("page") or 1)
@@ -138,8 +147,26 @@ def export(
                     if not rects:
                         skipped += 1
                         continue
-                    annot = page.add_highlight_annot(quads=rects)
+                    factory = page.add_highlight_annot if item.get("style", "marker") == "marker" else page.add_underline_annot
+                    annot = factory(quads=rects)
                     highlights += 1
+                elif kind == "ink":
+                    points = [(float(p["x"]), float(p["y"])) for p in item.get("points", [])]
+                    if len(points) < 2:
+                        skipped += 1
+                        continue
+                    annot = page.add_ink_annot([points])
+                    annot.set_border(width=float(item.get("width", 2)))
+                    notes += 1
+                elif kind == "text":
+                    point = item.get("point") or {}
+                    x, y = float(point.get("x", 0)), float(point.get("y", 0))
+                    size = float(item.get("fontSize", 18))
+                    # PDF built-in CJK font keeps Chinese comments readable on other machines.
+                    annot = page.add_freetext_annot(
+                        pymupdf.Rect(x, y, min(page.rect.width, x + 300), min(page.rect.height, y + max(60, (len(comment) // 15 + comment.count(chr(10)) + 2) * size * 1.4))),
+                        comment, fontsize=size, fontname="china-s", text_color=_ink_color(item))
+                    notes += 1
                 else:
                     point = item.get("point") or {}
                     x = float(point.get("x") or 0) - NOTE_SIZE / 2
@@ -155,7 +182,10 @@ def export(
                 continue
 
             try:
-                annot.set_colors(stroke=_color(item))
+                if kind != "text":
+                    annot.set_colors(stroke=_ink_color(item) if kind == "ink" else _color(item))
+                if kind in {"text", "ink"}:
+                    annot.set_opacity(float(item.get("opacity", 1)))
                 if kind == "highlight":
                     annot.set_opacity(OPACITY)
                 annot.set_info(
@@ -164,6 +194,8 @@ def export(
                     content=comment,
                 )
                 annot.update()
+                # A private PDF key preserves editable fonts, points, colors and styles.
+                document.xref_set_key(annot.xref, "BabelDOCData", pymupdf.get_pdf_str(json.dumps(item, ensure_ascii=True)))
             except Exception:
                 skipped += 1
 
@@ -224,6 +256,16 @@ def read(path: str | Path) -> list[dict]:
                     continue
                 if info.get("subject") != SUBJECT:
                     continue
+                try:
+                    value_type, raw = document.xref_get_key(annot.xref, "BabelDOCData")
+                    if value_type == "string":
+                        restored = json.loads(raw)
+                        if isinstance(restored, dict) and restored.get("type") in {"highlight", "note", "text", "ink"}:
+                            restored["page"] = number
+                            items.append(restored)
+                            continue
+                except (ValueError, TypeError):
+                    pass
                 comment = str(info.get("content") or "")
                 rect = annot.rect
                 if getattr(annot, "type", (None, ""))[0] == 8:

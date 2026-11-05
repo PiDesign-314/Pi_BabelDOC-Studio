@@ -84,6 +84,7 @@
     editor: $("#editor"),
     editorPage: $("#editor-page"),
     editorColors: $("#editor-colors"),
+    editorStyles: $("#editor-styles"),
     editorQuote: $("#editor-quote"),
     editorText: $("#editor-text"),
     editorClose: $("#editor-close"),
@@ -91,6 +92,10 @@
     editorDone: $("#editor-done"),
     tip: $("#tip"),
     menu: $("#menu"),
+    dock: $("#reader-dock"),
+    pop: $("#r-pop"),
+    selStyles: $("#sel-styles"),
+    toggleOriginal: $("#toggle-original"),
   };
 
   const state = {
@@ -207,7 +212,7 @@
     if (!state.fit) return;
     const width = Math.max(240, el.stage.clientWidth - 48);
     const height = Math.max(240, el.stage.clientHeight - 44);
-    const widthScale = width / state.base.w;
+    const widthScale = width / (state.base.w * (!originalVisible && state.base.w > state.base.h * 1.2 ? 0.5 : 1));
     const heightScale = height / state.base.h;
     state.scale = clamp(
       state.fit === "width" ? widthScale : Math.min(widthScale, heightScale),
@@ -272,6 +277,7 @@
       sheet.box.style.height = `${height}px`;
       sheet.width = width;
       sheet.height = height;
+      cropSheet(sheet);
     }
   }
 
@@ -407,6 +413,7 @@
       sheet.box.style.height = `${height}px`;
       sheet.width = width;
       sheet.height = height;
+      cropSheet(sheet);
       if (delta) shiftAfter(sheet.no - 1, delta);
 
       if (sheet.task) {
@@ -1456,6 +1463,8 @@
           const mark = document.createElement("div");
           mark.className = `r-mark ${item.color}${state.flashId === item.id ? " flash" : ""}`;
           mark.dataset.id = item.id;
+          mark.dataset.style = item.style || "marker";
+          mark.style.setProperty("--mark-color", COLOR_HEX[item.color]);
           mark.style.left = `${rect.x * scale}px`;
           mark.style.top = `${rect.y * scale}px`;
           mark.style.width = `${rect.w * scale}px`;
@@ -1464,6 +1473,8 @@
         }
         const anchor = badgeAnchor(item, sheet);
         if (anchor) fragment.appendChild(makeBadge(item, anchor, sheet));
+      } else if (["ink", "text"].includes(item.type) && item.page === sheet.no) {
+        fragment.appendChild(renderDrawing(item, sheet));
       } else if (item.type === "note" && item.page === sheet.no) {
         const marker = document.createElement("button");
         marker.type = "button";
@@ -1483,6 +1494,7 @@
           hideTip();
           openEditor(item.id, event);
         });
+        bindMovable(marker, item, sheet);
         fragment.appendChild(marker);
       }
     }
@@ -1499,7 +1511,7 @@
   }
 
   function showTip(item, target) {
-    const label = item.type === "note" ? "便签" : "高亮";
+    const label = ({note:"便签",highlight:"高亮",text:"文字",ink:"画笔"}[item.type] || "批注");
     el.tip.innerHTML =
       `<div class="r-tip-head"><span class="r-dotview" style="background:${
         COLOR_HEX[item.color] || COLOR_HEX.yellow
@@ -1585,7 +1597,7 @@
         (item) => `
         <article class="r-card" data-id="${item.id}">
           <div class="r-card-top">
-            <span class="r-badge-page">第 ${item.page} 页 · ${item.type === "note" ? "便签" : "高亮"}</span>
+            <span class="r-badge-page">第 ${item.page} 页 · ${({note:"便签",highlight:"高亮",text:"文字",ink:"画笔"}[item.type] || "批注")}</span>
             <span class="r-dotview ${item.color}" style="background:${
               COLOR_HEX[item.color] || COLOR_HEX.yellow
             }"></span>
@@ -1600,33 +1612,61 @@
       .join("");
   }
 
+  let saveRevision = 0;
+  let savedRevision = 0;
+  let saveQueue = Promise.resolve();
   function persist() {
+    const revision = ++saveRevision;
     el.saved.textContent = "保存中…";
     el.saved.classList.remove("ok");
     clearTimeout(state.saveTimer);
-    state.saveTimer = setTimeout(async () => {
-      const sent = state.items;
+    state.saveTimer = setTimeout(() => {
+      const snapshot = JSON.parse(JSON.stringify(state.items));
+      saveQueue = saveQueue.then(async () => {
       try {
         const result = await api("/api/annotations", {
           method: "POST",
-          body: { path: docPath, items: state.items },
+          body: { path: docPath, items: snapshot },
         });
         /* A slower response must not overwrite edits made while it was in
            flight; those already have their own save queued. */
-        if (state.items === sent) {
-          state.items = result.items || state.items;
+        let partial = false;
+        if (saveRevision === revision) {
+          const saved = Array.isArray(result.items) ? result.items : [];
+          const byId = new Map(saved.map((entry) => [entry.id, entry]));
+          /* Merge instead of replacing: a server that does not understand a
+             newer annotation type must not make it vanish from the page. Keep
+             the local copy and warn, rather than silently losing the work. */
+          state.items = state.items.map((item) => {
+            const fresh = byId.get(item.id);
+            if (!fresh) {
+              partial = true;
+              return item;
+            }
+            return { ...item, ...fresh };
+          });
           /* The response carries fresh item objects, so the per-page index has
              to be rebuilt — otherwise marks keep painting from stale copies. */
           reindex();
           renderNotesList();
           refreshAnnotations();
         }
-        el.saved.textContent = "已保存";
-        el.saved.classList.add("ok");
+        if (!partial) savedRevision = revision;
+        if (saveRevision === revision) {
+          if (partial) {
+            el.saved.textContent = "部分未保存";
+            el.saved.classList.remove("ok");
+            toast("有批注没能保存：请重启应用后再试", "bad");
+          } else {
+            el.saved.textContent = "已保存";
+            el.saved.classList.add("ok");
+          }
+        }
       } catch (error) {
         el.saved.textContent = "保存失败";
         toast(error.message, "bad");
       }
+      });
     }, 450);
   }
 
@@ -1664,6 +1704,9 @@
     state.items = items;
     reindex();
     renderNotesList();
+    /* Pages may already be painted by the time annotations arrive, so repaint
+       the marks instead of waiting for the next scroll or zoom. */
+    refreshAnnotations();
     if (imported) {
       toast(`已从 PDF 读取 ${items.length} 条批注`, "good");
       persist();
@@ -1780,6 +1823,7 @@
     top = clamp(top, 12, window.innerHeight - box.height - 12);
     el.selToolbar.style.left = `${left}px`;
     el.selToolbar.style.top = `${top}px`;
+    refreshDock();
   }
 
   function hideSelectionToolbar() {
@@ -1814,6 +1858,7 @@
       type: "highlight",
       page: captured.parts[0].page,
       color,
+      style: document.querySelector("#highlight-style").value,
       rects: captured.rects,
       ranges: captured.parts,
       text: captured.text,
@@ -1899,8 +1944,10 @@
     const item = state.items.find((entry) => entry.id === id);
     if (!item) return;
     state.activeId = id;
+    loadDrawingControls(item);
     el.editor.hidden = false;
-    el.editorPage.textContent = `第 ${item.page} 页 · ${item.type === "note" ? "便签" : "高亮"}`;
+    el.editorStyles.hidden = item.type !== "highlight";
+    el.editorPage.textContent = `第 ${item.page} 页 · ${({note:"便签",highlight:"高亮",text:"文字",ink:"画笔"}[item.type] || "批注")}`;
     el.editorQuote.textContent = item.text || "";
     el.editorQuote.hidden = !item.text;
     el.editorText.value = item.comment || "";
@@ -1937,6 +1984,12 @@
     }
     state.activeId = null;
     el.editor.hidden = true;
+    /* An empty text box would be invisible and un-clickable: drop it instead
+       of leaving a stray annotation on the page. */
+    if (item && item.type === "text" && !item.comment) {
+      removeAnnotation(item.id);
+      toast("空文字已移除", "good");
+    }
   }
 
   function deleteActive() {
@@ -2019,7 +2072,7 @@
   /* Where an annotation sits on its page, in PDF units.  Long highlights use
      their first line so the reader lands on readable text. */
   function annotationBounds(sheet, item) {
-    if (item.type === "note") {
+    if (["note", "text", "ink"].includes(item.type)) {
       const { x, y } = item.point || { x: 0, y: 0 };
       return { x: x - 6, y: y - 6, w: 12, h: 12 };
     }
@@ -2061,8 +2114,8 @@
         page = item.page;
         lines.push(`## 第 ${page} 页`, "");
       }
-      if (item.type === "note") {
-        lines.push(`- **便签**：${item.comment || "（空）"}`);
+      if (["note", "text", "ink"].includes(item.type)) {
+        lines.push(`- **${{note:"便签",text:"页面文字",ink:"笔迹（请导出 PDF 查看）"}[item.type]}**：${item.comment || "（空）"}`);
       } else {
         lines.push(`- **高亮（${COLOR_LABEL[item.color] || ""}）**：${item.text || "（无选中文字）"}`);
         if (item.comment) lines.push(`  > ${item.comment.replace(/\n+/g, " ")}`);
@@ -2199,6 +2252,7 @@
     );
 
     el.noteTool.addEventListener("click", () => {
+      setDrawingTool("select");
       state.noteTool = !state.noteTool;
       el.noteTool.setAttribute("aria-pressed", String(state.noteTool));
       el.pages.classList.toggle("note-mode", state.noteTool);
@@ -2357,7 +2411,7 @@
         savePdf();
         return;
       }
-      if (tag === "input" || tag === "textarea") return;
+      if (["input", "textarea", "select"].includes(tag)) return;
       if (event.key === "ArrowLeft" || event.key === "PageUp") {
         event.preventDefault();
         goToPage(state.page - 1);
@@ -2388,6 +2442,613 @@
     });
   }
 
+  // Persisted reader preferences are independent of PDF annotations.
+  let readerPrefs = {};
+  try { readerPrefs = JSON.parse(localStorage.getItem('babeldoc-reader') || '{}') || {}; } catch {}
+  let drawingTool = 'select';
+  let originalVisible = true;
+  const control = id => document.getElementById(id);
+  function storePrefs() { try { localStorage.setItem('babeldoc-reader', JSON.stringify(readerPrefs)); } catch {} }
+  function cropSheet(sheet) {
+    const dims = state.dims.get(sheet.no) || state.base;
+    const crop = !originalVisible && dims.w > dims.h * 1.2;
+    sheet.el.classList.toggle('translation-only', crop);
+    sheet.el.style.width = crop ? `${sheet.width / 2}px` : '';
+  }
+  function setDrawingTool(tool) {
+    if (tool === "note") {
+      closeEditor();
+      if (!state.noteTool) el.noteTool.click();
+      refreshDock();
+      return;
+    }
+    drawingTool = tool;
+    control("draw-tool").value = tool;
+    el.pages.classList.toggle("drawing", tool !== "select");
+    if (tool !== "select") {
+      state.noteTool = false;
+      el.noteTool.setAttribute("aria-pressed", "false");
+      el.pages.classList.remove("note-mode");
+      window.getSelection()?.removeAllRanges();
+      hideSelectionToolbar();
+    }
+    refreshDock();
+  }
+
+  function refreshDock() {
+    if (!el.dock) return;
+    const active = state.noteTool ? "note" : drawingTool;
+    for (const button of el.dock.querySelectorAll("[data-tool]")) {
+      const on = button.dataset.tool === active;
+      button.classList.toggle("on", on);
+      button.setAttribute("aria-pressed", String(on));
+    }
+    const style = control("highlight-style").value || "marker";
+    for (const button of $$("button[data-style]")) {
+      const on = button.dataset.style === style;
+      button.classList.toggle("on", on);
+      button.setAttribute("aria-pressed", String(on));
+    }
+    const dot = control("dock-ink-dot");
+    if (dot) dot.style.background = control("ink-color").value;
+    const paper = control("dock-paper");
+    if (paper) paper.classList.toggle("on", (control("paper-theme").value || "white") !== "white");
+    const original = control("toggle-original");
+    if (original) {
+      original.setAttribute("aria-pressed", String(originalVisible));
+      const title = originalVisible ? "隐藏左侧原文（适用于左右对照 PDF）" : "显示左侧原文";
+      original.title = title;
+      original.setAttribute("aria-label", title);
+    }
+  }
+
+  function setHighlightStyle(style) {
+    if (!["marker", "underline", "pencil"].includes(style)) return;
+    control("highlight-style").value = style;
+    control("highlight-style").dispatchEvent(new Event("input", { bubbles: true }));
+    refreshDock();
+  }
+
+  function drawingOptions() {
+    return {inkColor:control('ink-color').value, width:clamp(+control('ink-width').value || 2,.5,30),
+      opacity:+control('ink-opacity').value / 100, fontFamily:control('text-font').value,
+      fontSize:clamp(+control('text-size').value || 18,8,96)};
+  }
+  function loadDrawingControls(item) {
+    if (item.type === 'highlight') control('highlight-style').value = item.style || 'marker';
+    if (['ink','text'].includes(item.type)) {
+      control('ink-color').value = item.inkColor || '#30343b';
+      control('ink-width').value = item.width || 2;
+      control('ink-opacity').value = (item.opacity ?? 1)*100;
+      control('text-size').value = item.fontSize || 18;
+      if (![...control('text-font').options].some(o => o.value === item.fontFamily)) {
+        control('text-font').add(new Option(item.fontFamily || 'sans-serif'));
+      }
+      control('text-font').value = item.fontFamily || 'sans-serif';
+    }
+    refreshDock();
+  }
+  function commitDrawing(item) {
+    item.updated = Date.now()/1000;
+    reindex(); refreshAnnotations([item.page]); renderNotesList(); persist();
+  }
+  function renderDrawing(item, sheet) {
+    const scale = state.scale;
+    if (item.type === 'text') {
+      const node = document.createElement('button');
+      node.type = 'button';
+      node.className = 'r-page-text'; node.dataset.id = item.id;
+      node.textContent = item.comment || '点击编辑文字';
+      node.title = '拖动移动 · 点击编辑';
+      Object.assign(node.style, {left:`${item.point.x*scale}px`,top:`${item.point.y*scale}px`,color:item.inkColor,
+        opacity:item.opacity ?? 1,fontFamily:item.fontFamily || 'sans-serif',fontSize:`${(item.fontSize || 18)*scale}px`});
+      bindMovable(node,item,sheet);
+      node.addEventListener('click',event=>{event.stopPropagation();openEditor(item.id,event);});
+      return node;
+    }
+    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.classList.add('r-ink'); svg.setAttribute('width',sheet.width); svg.setAttribute('height',sheet.height);
+    const path = document.createElementNS(svg.namespaceURI,'path');
+    path.dataset.id = item.id;
+    path.setAttribute('d',(item.points || []).map((p,i)=>`${i?'L':'M'}${p.x*scale},${p.y*scale}`).join(' '));
+    path.setAttribute('fill','none');path.setAttribute('stroke',item.inkColor || '#30343b');
+    path.setAttribute('stroke-width',(item.width || 2)*scale);path.setAttribute('stroke-opacity',item.opacity ?? 1);
+    path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');
+    path.addEventListener('click',event=>{event.stopPropagation(); if(drawingTool==='select')openEditor(item.id,event);});
+    svg.append(path); return svg;
+  }
+  function bindMovable(node,item,sheet) {
+    node.addEventListener('pointerdown',event=>{
+      if (event.button !== 0 || drawingTool !== 'select' || state.noteTool) return;
+      event.stopPropagation(); event.preventDefault();
+      const start = {x:event.clientX,y:event.clientY}; const point = {...item.point}; let moved=false;
+      node.setPointerCapture(event.pointerId);
+      const move = e => {
+        if(Math.hypot(e.clientX-start.x,e.clientY-start.y)<4 && !moved)return;
+        moved=true; hideTip();
+        item.point={x:clamp(point.x+(e.clientX-start.x)/state.scale,0,sheet.width/state.scale-8),
+          y:clamp(point.y+(e.clientY-start.y)/state.scale,0,sheet.height/state.scale-8)};
+        node.style.left=`${item.point.x*state.scale}px`;node.style.top=`${item.point.y*state.scale}px`;
+      };
+      const end = e => {
+        node.removeEventListener('pointermove',move);node.removeEventListener('pointerup',end);node.removeEventListener('pointercancel',end);
+        if(e.type==='pointercancel') {item.point=point;refreshAnnotations([item.page]);return;}
+        if(moved) {node.addEventListener('click',e=>{e.stopImmediatePropagation();e.preventDefault();},{once:true,capture:true});commitDrawing(item);}
+      };
+      node.addEventListener('pointermove',move);node.addEventListener('pointerup',end);node.addEventListener('pointercancel',end);
+    });
+  }
+  function setupReaderTools() {
+    window.addEventListener("beforeunload", (event) => {
+      const active = state.items.find((item) => item.id === state.activeId);
+      if (savedRevision !== saveRevision || (active && el.editorText.value.trim() !== active.comment)) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    });
+
+    /* ------------------------------------------------------------ paper -- */
+    const themes = {
+      white: "#ffffff",
+      cream: "#f3ecda",
+      sage: "#e4eddf",
+      blue: "#e4ecf3",
+      rose: "#f3e6e4",
+      ink: "#e8e8e2",
+    };
+    function applyPaper() {
+      const theme = control("paper-theme").value;
+      document.body.dataset.paper = theme;
+      document.body.style.setProperty("--paper-color", themes[theme] || control("paper-color").value);
+      readerPrefs.paper = theme;
+      readerPrefs.paperColor = control("paper-color").value;
+      storePrefs();
+      refreshDock();
+    }
+    control("paper-theme").value = readerPrefs.paper || "white";
+    control("paper-color").value = readerPrefs.paperColor || "#f3ecda";
+    control("paper-theme").onchange = applyPaper;
+    control("paper-color").oninput = () => {
+      control("paper-theme").value = "custom";
+      applyPaper();
+    };
+    applyPaper();
+
+    el.toggleOriginal.addEventListener("click", () => {
+      if (!state.pdf || state.base.w <= state.base.h * 1.2) {
+        toast("此开关适用于原文在左、译文在右的左右对照 PDF");
+        return;
+      }
+      originalVisible = !originalVisible;
+      clearSync();
+      closeEditor();
+      hideSelectionToolbar();
+      relayout(scrollAnchor());
+      refreshDock();
+    });
+
+    /* ----------------------------------------------------- colour tags -- */
+    const labels = {
+      yellow: "疑问",
+      green: "结论",
+      red: "重点",
+      blue: "证据",
+      pink: "灵感",
+      orange: "待办",
+      purple: "定义",
+      teal: "方法",
+      ...readerPrefs.labels,
+    };
+    control("color-hints").checked = readerPrefs.hints !== false;
+    function updateHints() {
+      document.querySelectorAll(".r-dot[data-color]").forEach((dot) => {
+        const label = `${COLOR_LABEL[dot.dataset.color]} · ${labels[dot.dataset.color]}`;
+        dot.title = control("color-hints").checked ? label : COLOR_LABEL[dot.dataset.color];
+        dot.setAttribute("aria-label", label);
+        if (control("color-hints").checked) dot.dataset.hint = labels[dot.dataset.color];
+        else delete dot.dataset.hint;
+      });
+      readerPrefs.labels = labels;
+      readerPrefs.hints = control("color-hints").checked;
+      storePrefs();
+    }
+    control("color-hints").onchange = updateHints;
+    updateHints();
+
+    api("/api/fonts")
+      .then((data) => {
+        for (const font of data.fonts || []) {
+          if (![...control("text-font").options].some((o) => o.value === font)) {
+            control("text-font").add(new Option(font));
+          }
+        }
+      })
+      .catch(() => {});
+
+    control("draw-tool").onchange = () => {
+      closeEditor();
+      setDrawingTool(control("draw-tool").value);
+    };
+    for (const id of ["ink-color", "ink-width", "ink-opacity", "text-font", "text-size", "highlight-style"]) {
+      control(id).oninput = () => {
+        const item = state.items.find((a) => a.id === state.activeId);
+        if (!item) return;
+        if (item.type === "highlight") item.style = control("highlight-style").value;
+        else if (["text", "ink"].includes(item.type)) Object.assign(item, drawingOptions());
+        commitDrawing(item);
+      };
+    }
+    control("ink-color").addEventListener("input", refreshDock);
+    el.noteTool.addEventListener("click", refreshDock);
+
+    /* ------------------------------------------------------ popovers -- */
+    let popAnchor = null;
+    function closePopover() {
+      if (!el.pop || el.pop.hidden) return;
+      el.pop.hidden = true;
+      if (popAnchor) popAnchor.setAttribute("aria-expanded", "false");
+      popAnchor = null;
+    }
+    function positionPopover(anchor) {
+      const rect = anchor.getBoundingClientRect();
+      const box = el.pop.getBoundingClientRect();
+      let left = rect.left + rect.width / 2 - box.width / 2;
+      let top = rect.top - box.height - 12;
+      if (top < 12) top = rect.bottom + 12;
+      left = clamp(left, 12, Math.max(12, window.innerWidth - box.width - 12));
+      top = clamp(top, 12, Math.max(12, window.innerHeight - box.height - 12));
+      el.pop.style.left = `${left}px`;
+      el.pop.style.top = `${top}px`;
+    }
+    function openPopover(kind, anchor) {
+      if (!el.pop || !anchor) return;
+      if (popAnchor === anchor && !el.pop.hidden) {
+        closePopover();
+        return;
+      }
+      if (popAnchor) popAnchor.setAttribute("aria-expanded", "false");
+      popAnchor = anchor;
+      anchor.setAttribute("aria-expanded", "true");
+      renderPopover(kind);
+      el.pop.hidden = false;
+      positionPopover(anchor);
+    }
+    function renderPopover(kind) {
+      if (kind === "ink") return renderInkPopover();
+      if (kind === "text") return renderTextPopover();
+      if (kind === "paper") return renderPaperPopover();
+      return renderLegendPopover();
+    }
+
+    const INK_COLORS = ["#30343b", "#6b7280", "#0a84ff", "#30b158", "#ff9f0a", "#ff375f", "#bf5af2", "#00c7be"];
+    function renderInkPopover() {
+      const current = control("ink-color").value.toLowerCase();
+      el.pop.innerHTML =
+        '<p class="r-pop-title">墨色</p>' +
+        '<p class="r-pop-sub">用于自由画、直线与页面文字。</p>' +
+        '<div class="r-pop-swatches">' +
+        INK_COLORS.map(
+          (color) =>
+            `<button type="button" class="r-pop-swatch r-pop-ink${
+              color.toLowerCase() === current ? " on" : ""
+            }" data-ink="${color}" style="background:${color}" aria-label="${color}"></button>`
+        ).join("") +
+        "</div>" +
+        '<label class="r-pop-row"><span>粗细</span><input id="pop-width" type="range" min="0.5" max="30" step="0.5"><span class="r-pop-value" id="pop-width-v"></span></label>' +
+        '<label class="r-pop-row"><span>不透明度</span><input id="pop-opacity" type="range" min="5" max="100" step="5"><span class="r-pop-value" id="pop-opacity-v"></span></label>' +
+        '<label class="r-pop-row"><span>自定义</span><input id="pop-ink-color" type="color"></label>';
+      for (const swatch of el.pop.querySelectorAll("[data-ink]")) {
+        swatch.addEventListener("click", () => {
+          control("ink-color").value = swatch.dataset.ink;
+          control("ink-color").dispatchEvent(new Event("input", { bubbles: true }));
+          for (const other of el.pop.querySelectorAll("[data-ink]")) other.classList.toggle("on", other === swatch);
+          refreshDock();
+        });
+      }
+      const width = el.pop.querySelector("#pop-width");
+      const widthValue = el.pop.querySelector("#pop-width-v");
+      width.value = String(control("ink-width").value);
+      const showWidth = () => {
+        widthValue.textContent = `${(+width.value).toFixed(1).replace(/\.0$/, "")} pt`;
+      };
+      showWidth();
+      width.addEventListener("input", () => {
+        control("ink-width").value = width.value;
+        control("ink-width").dispatchEvent(new Event("input", { bubbles: true }));
+        showWidth();
+      });
+      const opacity = el.pop.querySelector("#pop-opacity");
+      const opacityValue = el.pop.querySelector("#pop-opacity-v");
+      opacity.value = String(control("ink-opacity").value);
+      const showOpacity = () => {
+        opacityValue.textContent = `${opacity.value}%`;
+      };
+      showOpacity();
+      opacity.addEventListener("input", () => {
+        control("ink-opacity").value = opacity.value;
+        control("ink-opacity").dispatchEvent(new Event("input", { bubbles: true }));
+        showOpacity();
+      });
+      const custom = el.pop.querySelector("#pop-ink-color");
+      custom.value = control("ink-color").value;
+      custom.addEventListener("input", () => {
+        control("ink-color").value = custom.value;
+        control("ink-color").dispatchEvent(new Event("input", { bubbles: true }));
+        for (const other of el.pop.querySelectorAll("[data-ink]")) other.classList.remove("on");
+        refreshDock();
+      });
+    }
+
+    function renderTextPopover() {
+      el.pop.innerHTML =
+        '<p class="r-pop-title">字体与字号</p>' +
+        '<p class="r-pop-sub">用于「页面文字」工具输入的文字。</p>' +
+        '<label class="r-pop-row"><span>字体</span><select id="pop-font"></select></label>' +
+        '<label class="r-pop-row"><span>字号</span><input id="pop-size" type="number" min="8" max="96"></label>';
+      const select = el.pop.querySelector("#pop-font");
+      select.replaceChildren(...[...control("text-font").options].map((option) => new Option(option.value, option.value)));
+      select.value = control("text-font").value;
+      select.addEventListener("change", () => {
+        control("text-font").value = select.value;
+        control("text-font").dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const size = el.pop.querySelector("#pop-size");
+      size.value = control("text-size").value;
+      size.addEventListener("input", () => {
+        if (!size.value) return;
+        control("text-size").value = size.value;
+        control("text-size").dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    }
+
+    const PAPERS = [
+      ["white", "原色", "#ffffff"],
+      ["cream", "暖米", "#f3ecda"],
+      ["sage", "浅绿", "#e4eddf"],
+      ["blue", "雾蓝", "#e4ecf3"],
+      ["rose", "浅粉", "#f3e6e4"],
+      ["ink", "水墨屏", "#e8e8e2"],
+    ];
+    function renderPaperPopover() {
+      const current = control("paper-theme").value;
+      el.pop.innerHTML =
+        '<p class="r-pop-title">纸面</p>' +
+        '<p class="r-pop-sub">只换纸张底色；高亮与墨迹保持原色，水墨屏下也不会变灰。</p>' +
+        '<div class="r-pop-choices">' +
+        PAPERS.map(
+          ([id, label, color]) =>
+            `<button type="button" class="r-pop-choice${id === current ? " on" : ""}" data-paper="${id}">` +
+            `<span class="r-pop-choice-dot" style="background:${color}"></span>` +
+            `<span>${label}</span>` +
+            '<svg class="r-pop-choice-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.4 3.2 3.2L13 4.8"/></svg>' +
+            "</button>"
+        ).join("") +
+        "</div>" +
+        '<label class="r-pop-row" style="margin-top:12px"><span>自定义</span><input id="pop-paper-color" type="color"></label>';
+      for (const button of el.pop.querySelectorAll("[data-paper]")) {
+        button.addEventListener("click", () => {
+          control("paper-theme").value = button.dataset.paper;
+          control("paper-theme").dispatchEvent(new Event("change"));
+          for (const other of el.pop.querySelectorAll("[data-paper]")) other.classList.toggle("on", other === button);
+        });
+      }
+      const custom = el.pop.querySelector("#pop-paper-color");
+      custom.value = control("paper-color").value;
+      custom.addEventListener("input", () => {
+        control("paper-color").value = custom.value;
+        control("paper-color").dispatchEvent(new Event("input"));
+        for (const other of el.pop.querySelectorAll("[data-paper]")) other.classList.remove("on");
+      });
+    }
+
+    function renderLegendPopover() {
+      const rows = Object.keys(COLOR_HEX)
+        .map(
+          (key) =>
+            `<label class="r-pop-item"><span class="r-dotview" style="background:${COLOR_HEX[key]}"></span>` +
+            `<span>${COLOR_LABEL[key]}</span>` +
+            `<input data-legend="${key}" maxlength="12" value="${escapeHtml(labels[key])}"></label>`
+        )
+        .join("");
+      el.pop.innerHTML =
+        '<p class="r-pop-title">颜色标签</p>' +
+        '<p class="r-pop-sub">给每种颜色写一句用途说明，鼠标停在色点上就能看到。</p>' +
+        `<div class="r-pop-list">${rows}</div>` +
+        '<label class="r-pop-check"><input type="checkbox" id="pop-hints"> 显示功能提示</label>';
+      for (const input of el.pop.querySelectorAll("[data-legend]")) {
+        input.addEventListener("input", () => {
+          labels[input.dataset.legend] = input.value;
+          updateHints();
+        });
+      }
+      const hints = el.pop.querySelector("#pop-hints");
+      hints.checked = control("color-hints").checked;
+      hints.addEventListener("change", () => {
+        control("color-hints").checked = hints.checked;
+        updateHints();
+      });
+    }
+
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (!popAnchor || el.pop.hidden) return;
+        const target = event.target instanceof Element ? event.target : null;
+        if (target && (target.closest("#r-pop") || target === popAnchor)) return;
+        closePopover();
+      },
+      true
+    );
+
+    /* ------------------------------------------------------------ dock -- */
+    if (el.dock) {
+      el.dock.addEventListener("mousedown", (event) => event.stopPropagation());
+      for (const button of el.dock.querySelectorAll("[data-tool]")) {
+        button.addEventListener("click", () => {
+          closePopover();
+          const tool = button.dataset.tool;
+          if (tool === "note") {
+            closeEditor();
+            el.noteTool.click();
+            refreshDock();
+            return;
+          }
+          closeEditor();
+          if (tool === "select" && state.noteTool) {
+            el.noteTool.click();
+            return;
+          }
+          setDrawingTool(tool);
+        });
+      }
+      control("dock-ink").addEventListener("click", () => openPopover("ink", control("dock-ink")));
+      control("dock-text").addEventListener("click", () => openPopover("text", control("dock-text")));
+      control("dock-paper").addEventListener("click", () => openPopover("paper", control("dock-paper")));
+      control("dock-legend").addEventListener("click", () => openPopover("legend", control("dock-legend")));
+    }
+    el.pop.addEventListener("mousedown", (event) => event.stopPropagation());
+    for (const button of $$("button[data-style]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setHighlightStyle(button.dataset.style);
+      });
+    }
+    refreshDock();
+
+    /* ----------------------------------------------------------- page -- */
+    let suppressPageClick = false;
+    el.pages.addEventListener(
+      "click",
+      (event) => {
+        if (drawingTool !== "select" || suppressPageClick) {
+          suppressPageClick = false;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      },
+      true
+    );
+    el.pages.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (event.button !== 0 || drawingTool === "select") return;
+        const section = event.target.closest(".r-sheet");
+        if (!section) return;
+        const sheet = state.sheets[+section.dataset.page - 1];
+        if (!sheet) return;
+        event.preventDefault();
+        event.stopPropagation();
+        closePopover();
+        closeEditor();
+        const start = pointToPage(sheet, event.clientX, event.clientY);
+        if (drawingTool === "text") {
+          /* Placing text must never leave the sticky-note tool armed. */
+          state.noteTool = false;
+          el.noteTool.setAttribute("aria-pressed", "false");
+          el.pages.classList.remove("note-mode");
+          const item = addAnnotation({ type: "text", page: sheet.no, point: start, ...drawingOptions() });
+          commitDrawing(item);
+          setDrawingTool("select");
+          suppressPageClick = true;
+          openEditor(item.id, event);
+          return;
+        }
+        if (drawingTool === "erase") {
+          const erase = (e) => {
+            const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-id]");
+            if (hit && state.items.some((a) => a.id === hit.dataset.id && a.type === "ink")) removeAnnotation(hit.dataset.id);
+          };
+          erase(event);
+          el.pages.setPointerCapture(event.pointerId);
+          const done = () => {
+            el.pages.removeEventListener("pointermove", erase);
+            el.pages.removeEventListener("pointerup", done);
+            el.pages.removeEventListener("pointercancel", done);
+          };
+          el.pages.addEventListener("pointermove", erase);
+          el.pages.addEventListener("pointerup", done);
+          el.pages.addEventListener("pointercancel", done);
+          return;
+        }
+        const tool = drawingTool;
+        const item = { type: "ink", page: sheet.no, point: start, points: [start], ...drawingOptions() };
+        let preview = renderDrawing(item, sheet);
+        sheet.anno.append(preview);
+        el.pages.setPointerCapture(event.pointerId);
+        let frame = 0;
+        const move = (e) => {
+          const p = pointToPage(sheet, e.clientX, e.clientY);
+          p.x = clamp(p.x, 0, sheet.width / state.scale);
+          p.y = clamp(p.y, 0, sheet.height / state.scale);
+          if (tool === "line") item.points = [start, p];
+          else if (item.points.length < 12000) item.points.push(p);
+          if (!frame) {
+            frame = requestAnimationFrame(() => {
+              frame = 0;
+              const next = renderDrawing(item, sheet);
+              preview.replaceWith(next);
+              preview = next;
+            });
+          }
+        };
+        const done = (e) => {
+          el.pages.removeEventListener("pointermove", move);
+          el.pages.removeEventListener("pointerup", done);
+          el.pages.removeEventListener("pointercancel", done);
+          cancelAnimationFrame(frame);
+          preview.remove();
+          if (e.type !== "pointercancel" && item.points.length > 1) commitDrawing(addAnnotation(item));
+        };
+        el.pages.addEventListener("pointermove", move);
+        el.pages.addEventListener("pointerup", done);
+        el.pages.addEventListener("pointercancel", done);
+      },
+      true
+    );
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closePopover();
+        if (state.noteTool) el.noteTool.click();
+        setDrawingTool("select");
+      }
+    });
+    document.addEventListener("contextmenu", (event) => {
+      if (event.target.closest("input,textarea,[contenteditable=true]")) return;
+      event.preventDefault();
+      closeMenu();
+      closePopover();
+      const choices = [
+        ["select", "选择 / 移动"],
+        ["note", "便签"],
+        ["text", "页面文字"],
+        ["pen", "自由画"],
+        ["line", "直线"],
+        ["erase", "橡皮擦（整笔）"],
+      ];
+      el.menu.replaceChildren();
+      for (const [tool, label] of choices) {
+        const button = document.createElement("button");
+        button.textContent = label;
+        button.type = "button";
+        button.onclick = () => {
+          closeMenu();
+          if (tool === "note") {
+            if (!state.noteTool) el.noteTool.click();
+          } else {
+            setDrawingTool(tool);
+          }
+        };
+        el.menu.append(button);
+      }
+      el.menu.hidden = false;
+      const box = el.menu.getBoundingClientRect();
+      el.menu.style.left = `${clamp(event.clientX, 8, innerWidth - box.width - 8)}px`;
+      el.menu.style.top = `${clamp(event.clientY, 8, innerHeight - box.height - 8)}px`;
+    });
+  }
+
   bindEvents();
+  setupReaderTools();
   boot();
 })();

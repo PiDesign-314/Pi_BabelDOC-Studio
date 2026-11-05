@@ -252,3 +252,32 @@ def test_unknown_colour_falls_back_to_yellow(tmp_path):
         annot = next(document[0].annots())
         stroke = tuple(round(value, 2) for value in annot.colors["stroke"])
     assert stroke == (1.0, 0.84, 0.1)
+
+
+def test_drawing_roundtrip(tmp_path, annotation_dir):
+    source = make_pdf(tmp_path / 'drawing.pdf')
+    items = [
+        {'type':'text','page':1,'point':{'x':90,'y':120},'comment':'中文批注 Hello',
+         'inkColor':'#126634','fontFamily':'Microsoft YaHei','fontSize':22,'opacity':0.6},
+        {'type':'ink','page':1,'point':{'x':30,'y':40},'points':[{'x':30,'y':40},{'x':80,'y':90},{'x':150,'y':40}],
+         'inkColor':'#ff0000','width':5,'opacity':0.4},
+        {'type':'highlight','page':2,'color':'red','style':'pencil',
+         'rects':[{'x':70,'y':86,'w':120,'h':14}]},
+    ]
+    stored = annotations.save(source, items)['items']
+    result = pdfexport.export(source, stored)
+    assert result['count'] == 3 and result['skipped'] == 0
+    restored = pdfexport.read(result['path'])
+    assert restored == stored
+    with pymupdf.open(result['path']) as doc:
+        assert [a.type[0] for a in doc[0].annots()] == [2,15]
+        page = doc[1]
+        assert next(page.annots()).type[0] == 9
+
+
+def test_drawing_fields_are_bounded():
+    item = annotations._sanitize([{'type':'ink','page':1,'width':999,'opacity':-3,
+        'inkColor':'javascript:bad','fontSize':999,'points':[{'x':-1,'y':float('nan')}]}])[0]
+    assert item['width'] == 30 and item['opacity'] == .05
+    assert item['inkColor'] == '#30343b' and item['fontSize'] == 96
+    assert item['points'] == [{'x':0,'y':0}]

@@ -134,6 +134,16 @@ body {
   box-shadow: 0 6px 16px rgba(255, 55, 95, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
+/* The app artwork doubles as the in-app brand mark. */
+.mark-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: block;
+  flex: none;
+  box-shadow: 0 6px 16px rgba(255, 55, 95, 0.28);
+}
+
 .brand-text h1 {
   margin: 0;
   font-size: 16px;
