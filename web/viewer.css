@@ -994,6 +994,14 @@ body[data-paper=ink] .r-stage { background: #cfcfc8; }
 
 .r-sheet.translation-only { overflow: hidden; }
 .r-sheet.translation-only .r-page { transform: translateX(-50%); }
+/* The margin layer lives outside the cropped sheet.  With overflow hidden the
+   cards were clipped away as soon as the left original page was hidden; keep
+   the sheet open for the margin and clip only the page's own left half. */
+body.margin-notes .r-sheet.translation-only { overflow: visible; }
+body.margin-notes .r-sheet.translation-only .r-page {
+  -webkit-clip-path: inset(0 0 0 50%);
+  clip-path: inset(0 0 0 50%);
+}
 .r-mark[data-style=underline], .r-mark[data-style=pencil] { background: transparent; border-radius: 0; border-bottom: 2px solid var(--mark-color); box-sizing: border-box; }
 .r-mark[data-style=pencil] { border-bottom-style: dashed; border-bottom-width: 1.5px; }
 .r-page-text { position: absolute; pointer-events: auto; cursor: grab; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 300px; border: 0; background: transparent; padding: 0; text-align: left; line-height: 1.35; touch-action: none; }

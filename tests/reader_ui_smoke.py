@@ -109,10 +109,17 @@ with sync_playwright() as p:
     new = note.bounding_box()
     assert new["x"] > old["x"] + 40
 
-    # hide the original half of a dual page
+    # hide the original half of a dual page; margin cards must stay visible
+    pg.locator('#reader-dock [data-action="layout"]').click()
+    pg.wait_for_timeout(700)
     pg.locator('#reader-dock [data-action="original"]').click()
     assert pg.locator(".translation-only").count() == 1
+    pg.wait_for_timeout(500)
+    assert pg.locator(".r-mcard").count() > 0, "margin cards disappeared with original hidden"
+    card_box = pg.locator(".r-mcard").first.bounding_box()
+    assert card_box and card_box["x"] >= 0 and card_box["x"] < 1440, card_box
     pg.locator('#reader-dock [data-action="original"]').click()
+    pg.locator('#reader-dock [data-action="layout"]').click()
     pg.wait_for_selector(".r-sheet .r-text span", timeout=30000)
     pg.wait_for_timeout(400)
 
