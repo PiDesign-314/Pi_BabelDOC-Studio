@@ -170,7 +170,7 @@ python app.py --server-only   # 只启动本地服务，用浏览器访问 http:
 - 在结果库中重命名论文时，子文件夹会一起改名，关联批注会跟随迁移。
 
 <div align="center">
-  <img src="docs/screenshots/library-gpt4.png" width="88%" alt="结果库"/>
+  <img src="docs/screenshots/library-collections.png" width="88%" alt="结果库（拖拽归类）"/>
 </div>
 
 ### 设置与数据
