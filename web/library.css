@@ -694,3 +694,26 @@ a.lib-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px
   .lib-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .lib-empty { padding: 48px 12px 28px; }
 }
+
+
+/* Drag a paper row onto a collection in the left rail. */
+.rail-hint {
+  margin: 8px 8px 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+  transition: color 0.15s ease;
+}
+body.lib-dragging .rail-hint { color: var(--accent); }
+body.lib-dragging { cursor: grabbing; }
+.lib-card { cursor: grab; }
+.lib-card.dragging { opacity: 0.42; cursor: grabbing; }
+.lib-card.dragging .lib-thumb { pointer-events: none; }
+.rail-item.drop-target {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+  outline: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -2px;
+}
+.rail-item.drop-target .rail-name { font-weight: 600; }
+.rail-item.drop-target em { color: var(--accent) !important; }

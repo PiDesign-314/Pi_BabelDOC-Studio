@@ -39,6 +39,7 @@
     filter: "all",
     timer: null,
     collectId: null,
+    dragId: null,
   };
 
   bindTheme($("#btn-theme"));
@@ -307,6 +308,7 @@
         const count = countIn(entry.id);
         return `<div class="rail-item${entry.id === state.filter ? " on" : ""}"
                     data-filter="${entry.id}" role="button" tabindex="0"
+                    title="拖拽论文到这里归入「${escapeHtml(entry.name)}」"
                     aria-pressed="${entry.id === state.filter}">
           ${ico.folder}
           <span class="rail-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
@@ -353,14 +355,14 @@
     if (state.filter === "unfiled") {
       return {
         title: "所有论文都已归类",
-        text: "每篇论文都至少在一个合集里。点卡片上的「归类」可以调整。",
+        text: "每篇论文都至少在一个合集里。把论文拖到左侧「未分类」，可以移出所有合集。",
         actions: false,
       };
     }
     if (state.filter !== "all") {
       return {
         title: "这个合集还是空的",
-        text: "点卡片上的「归类」把论文放进这个合集。",
+        text: "把论文拖到左侧合集，或点卡片上的「归类」把论文放进来。",
         actions: false,
       };
     }
@@ -409,7 +411,7 @@
             const pdf = file.name.toLowerCase().endsWith(".pdf");
             const label = escapeHtml(file.kind);
             return pdf
-              ? `<a class="lib-chip" href="${readerLink(file)}" title="在阅读器打开">${label}</a>`
+              ? `<a class="lib-chip" href="${readerLink(file)}" draggable="false" title="在阅读器打开">${label}</a>`
               : `<span class="lib-chip" title="${escapeHtml(file.name)}">${label}</span>`;
           })
           .join("");
@@ -423,8 +425,9 @@
           .map((entry) => `<span class="lib-tag">${escapeHtml(entry.name)}</span>`)
           .join("");
         return `
-          <article class="lib-card" data-id="${item.id}" style="--i:${index}">
+          <article class="lib-card" data-id="${item.id}" draggable="true" style="--i:${index}">
             <a class="lib-thumb" href="${primary ? readerLink(primary) : "#"}"
+               draggable="false"
                title="${escapeHtml(item.name)}" aria-label="阅读 ${escapeHtml(item.name)}">
               <span class="lib-thumb-label" aria-hidden="true">PDF</span>
               ${
@@ -604,6 +607,104 @@
       toast(error.message, "bad");
     }
   }
+
+  /* ---------------------------------------------------- drag to collect -- */
+  function clearDropTargets() {
+    for (const node of $$(".rail-item.drop-target", el.rail)) {
+      node.classList.remove("drop-target");
+    }
+    document.body.classList.remove("lib-dragging");
+  }
+
+  async function assignToCollection(item, filter) {
+    const current = new Set(item.collections || []);
+    let next;
+    if (filter === "unfiled") {
+      if (!current.size) {
+        toast("这篇论文还没有归入任何合集", "good");
+        return;
+      }
+      next = [];
+    } else {
+      const entry = collectionById(filter);
+      if (!entry) return;
+      if (current.has(filter)) {
+        toast(`已在「${entry.name}」里`, "good");
+        return;
+      }
+      next = [...current, filter];
+    }
+    try {
+      const data = await api("/api/collections/assign", {
+        method: "POST",
+        body: { item: item.id, collections: next },
+      });
+      state.collections = data.collections || state.collections;
+      item.collections = next;
+      closeCollect();
+      render();
+      if (filter === "unfiled") {
+        toast("已移出所有合集", "good");
+      } else {
+        toast(`已归入「${collectionById(filter).name}」`, "good");
+      }
+    } catch (error) {
+      toast(error.message, "bad");
+    }
+  }
+
+  el.grid.addEventListener("dragstart", (event) => {
+    const card = event.target.closest(".lib-card");
+    if (!card || event.target.closest("button, input, textarea")) {
+      event.preventDefault();
+      return;
+    }
+    const item = itemById(card.dataset.id);
+    if (!item) return;
+    state.dragId = item.id;
+    event.dataTransfer.effectAllowed = "copyMove";
+    event.dataTransfer.setData("text/plain", item.id);
+    card.classList.add("dragging");
+    document.body.classList.add("lib-dragging");
+    closeCollect();
+  });
+
+  el.grid.addEventListener("dragend", () => {
+    state.dragId = null;
+    for (const node of $$(".lib-card.dragging", el.grid)) node.classList.remove("dragging");
+    clearDropTargets();
+  });
+
+  el.rail.addEventListener("dragover", (event) => {
+    if (!state.dragId) return;
+    const row = event.target.closest(".rail-item[data-filter]");
+    if (!row) return;
+    const filter = row.dataset.filter;
+    if (filter !== "unfiled" && !collectionById(filter)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    if (!row.classList.contains("drop-target")) {
+      clearDropTargets();
+      row.classList.add("drop-target");
+      document.body.classList.add("lib-dragging");
+    }
+  });
+
+  el.rail.addEventListener("dragleave", (event) => {
+    const row = event.target.closest(".rail-item[data-filter]");
+    if (row && !row.contains(event.relatedTarget)) row.classList.remove("drop-target");
+  });
+
+  el.rail.addEventListener("drop", async (event) => {
+    const row = event.target.closest(".rail-item[data-filter]");
+    if (!row || !state.dragId) return;
+    event.preventDefault();
+    const item = itemById(state.dragId);
+    const filter = row.dataset.filter;
+    state.dragId = null;
+    clearDropTargets();
+    if (item) await assignToCollection(item, filter);
+  });
 
   el.grid.addEventListener("click", (event) => {
     const button = event.target.closest("[data-act]");
