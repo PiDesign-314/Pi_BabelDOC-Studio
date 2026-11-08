@@ -78,20 +78,35 @@ def _build_launcher(out):
     print('已生成启动器：BabelDOC Studio.exe')
 
 
+def _powershell():
+    """Prefer PowerShell 7 (pwsh), fall back to Windows PowerShell 5.1."""
+    return shutil.which('pwsh') or shutil.which('powershell') or 'powershell'
+
+
+def _powershell_env():
+    # 在 pwsh（PowerShell 7）下面调用 Windows PowerShell 时，继承来的 PSModulePath 可能
+    # 让 Microsoft.PowerShell.Security 无法自动加载（Get-AuthenticodeSignature 会报错）。
+    env = os.environ.copy()
+    system_root = os.environ.get('SystemRoot', r'C:\Windows')
+    modules = str(Path(system_root) / 'System32' / 'WindowsPowerShell' / 'v1.0' / 'Modules')
+    env['PSModulePath'] = modules + os.pathsep + env.get('PSModulePath', '')
+    return env
+
+
 def _powershell_script(*arguments):
     subprocess.run(
-        ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(SIGN_SCRIPT),
+        [_powershell(), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(SIGN_SCRIPT),
          *[str(argument) for argument in arguments]],
-        check=True,
+        check=True, env=_powershell_env(),
     )
 
 
 def _signature_status(path):
     """Return the Authenticode status of one file (Windows only)."""
     result = subprocess.run(
-        ['powershell', '-NoProfile', '-Command',
+        [_powershell(), '-NoProfile', '-Command',
          f"(Get-AuthenticodeSignature -LiteralPath '{path}').Status"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=_powershell_env(),
     )
     return result.stdout.strip()
 
@@ -141,7 +156,11 @@ def main():
         print('签名全部 exe / dll / pyd ...')
         _powershell_script('-Path', out, '-Mode', 'Sign')
     else:
-        _powershell_script('-Path', out, '-Mode', 'Audit')
+        try:
+            _powershell_script('-Path', out, '-Mode', 'Audit')
+        except (subprocess.CalledProcessError, OSError) as error:
+            # 审计只是给用户/支持者看的附加信息，失败不应该阻断发布构建。
+            print(f'警告: 签名状态审计失败（{error}），跳过 SIGNING-STATUS.txt。')
         print('提示: 这是未签名构建；Windows 11 智能应用控制开启时会拦截，详见 docs/SMART-APP-CONTROL.md。')
     archive = Path(shutil.make_archive(str(out),'zip',out.parent,out.name))
     digest=hashlib.file_digest(archive.open('rb'),'sha256').hexdigest()
