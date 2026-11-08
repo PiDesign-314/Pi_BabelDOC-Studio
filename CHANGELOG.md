@@ -32,6 +32,24 @@
   `tests/reader_ai_toc_ui.py`（Playwright 冒烟：目录跳页、右键引用、出处跳转）。
 - 真实 Codex 端到端冒烟：在 NIPS 2017 论文上识别出 23 条目录；提问 35 秒返回带 8 处引文的回答。
 
+### 安装包与 Windows 兼容
+- 新增 [docs/SMART-APP-CONTROL.md](docs/SMART-APP-CONTROL.md)：说明 Windows 11 智能应用控制（SAC）
+  为什么会拦 `Start.bat` / `pythonw.exe` / `*.pyd`、怎么确认它是否开启，以及「先解除锁定 →
+  用 PowerShell 解压 → 关闭 SAC」的处理顺序；README 和包内新增的 `启动失败看这里.txt` 都指向这份文档。
+- 免安装包新增 `SIGNING-STATUS.txt`：记录 390 个 exe / dll / pyd 的签名统计（当前 375 个未签名，
+  只有随包附带的 Microsoft / PSF 二进制自带签名），方便用户和支持者一眼确认拦截原因。
+- 新增 `tools/sign_release.ps1`：审计或签名包内全部 exe / dll / pyd；`build_portable.py --sign`
+  会在打 ZIP **之前**完成签名并逐个校验，签名失败直接中止构建。没装 Windows SDK 时脚本会自动退回
+  Windows 自带的 `Set-AuthenticodeSignature`（支持证书指纹 / PFX + RFC3161 时间戳）。
+- 免安装包新增 `BabelDOC Studio.exe` 启动器（`tools/launcher/Launcher.cs`，约 81 KB，用 Windows 自带的
+  csc 编译，只负责调用 `runtime\pythonw.exe -s app.py`）。它是普通可执行文件，可以参与代码签名；
+  `Start.bat` 保留为后备入口。
+- `BabelDOC Studio.exe` 和 `Start.bat` 首次运行会自动清除包内所有文件的「来自 Internet」标记
+  （等价于 `Unblock-File`），完成后写入 `.babeldoc-unblocked` 标记，之后跳过扫描；用户不再需要
+  手动输入解除锁定的命令。
+- 发布工作流支持注入 `SIGN_PFX_BASE64` / `SIGN_PFX_PASSWORD` 后自动带签名构建；没有配置证书时
+  仍打未签名包，但会在发布说明顶部加入 SAC 提醒。
+
 ## v1.4.0 — 2026-11-05
 
 本版把界面整体切换到 Apple HIG 设计语言，并重做阅读器的文字、批注与工具栏交互。

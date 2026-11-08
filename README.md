@@ -33,7 +33,8 @@ BabelDOC Studio 是一个面向 **PDF 论文 / 技术文档** 的本地翻译工
 
 > [!TIP]
 > 第一次使用？直接下载 [Windows 免安装包](https://github.com/PiDesign-314/Pi_BabelDOC-Studio/releases/latest)，
-> 解压后双击 `Start.bat`，不需要安装 Python。
+> 解压后双击 `Start.bat`（将来签名版会用 `BabelDOC Studio.exe`），不需要安装 Python。Windows 11 用户建议先看下面的
+> [解压与「智能应用控制」](#解压与智能应用控制)：先给 ZIP 解除锁定再解压，能避免大多数启动拦截。
 
 > [!NOTE]
 > 没有 API Key 也能试用：翻译设置里选择「Google 翻译（免费）」，或在本机运行 Ollama。
@@ -56,13 +57,55 @@ BabelDOC Studio 是一个面向 **PDF 论文 / 技术文档** 的本地翻译工
 
 1. 打开 [Releases](https://github.com/PiDesign-314/Pi_BabelDOC-Studio/releases/latest)，下载
    **`BabelDOC-Studio-Windows-x64.zip`**（不要下载 GitHub 自动生成的 Source code ZIP）。
-2. 解压到一个有写入权限的目录。包内已包含 Python、BabelDOC、依赖、离线模型与字体。
-3. 双击 **`Start.bat`**。应用会启动本地服务并打开 Edge / Chrome 应用窗口。
+2. **先解除锁定再解压**（Windows 11 尤其重要）：右键 ZIP → 属性 → 常规 → 勾选「解除锁定」→ 确定，
+   再解压到一个有写入权限的目录。也可以在 PowerShell 里解压，见下面的
+   [解压与「智能应用控制」](#解压与智能应用控制)。包内已包含 Python、BabelDOC、依赖、离线模型与字体。
+3. 双击 **`Start.bat`** 启动。应用会启动本地服务并打开 Edge / Chrome 应用窗口。
+   （包里的 `BabelDOC Studio.exe` 是给代码签名预留的启动器，签名版会以它为默认入口；当前未签名版本在
+   开启 SAC 的机器上更容易被拦，优先用 `Start.bat`。）
 4. 上传 PDF，选择翻译服务并填入 API Key（或选择 Google 免费翻译），点击「开始翻译」。
 
 > [!NOTE]
-> 当前安装包未做代码签名，Windows SmartScreen 可能提示「未知发布者」；确认来源后选择「更多信息 → 仍要运行」。
+> 当前安装包**未做代码签名**，可能遇到两种 Windows 拦截：SmartScreen 的「未知发布者」
+> （点「更多信息 → 仍要运行」即可），以及 Windows 11 **智能应用控制**（没有白名单，处理方式见下一节）。
 > 更新时关闭旧程序，解压新版本到新目录即可；设置、术语库、批注和译文数据与程序目录分开保存。
+
+### 解压与智能应用控制
+
+Windows 11 的**智能应用控制（SAC）** 会拦截从网上下载的脚本和未签名程序。用资源管理器直接解压时，
+ZIP 的「来自 Internet」标记会复制到每个文件，脚本和没有签名的程序都可能被拦，提示
+「智能应用控制已阻止可能不安全的文件 / 应用」。按下面顺序处理：
+
+1. **清掉「来自 Internet」标记**：解压前右键 ZIP → 属性 → 勾选「解除锁定」；已经解压过的，在解压
+   目录里打开 PowerShell 执行
+   `Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue | Unblock-File`（直接粘贴命令，不要存成
+   `.ps1` 再运行）。这一步能解决大多数「文件被阻止」的提示。
+
+   > 其实多数情况下**不需要手动输入命令**：包里的 `BabelDOC Studio.exe` 和 `Start.bat` 首次运行时会
+   > 自动清掉整个目录的「来自 Internet」标记（完成后写 `.babeldoc-unblocked` 标记，之后跳过）。
+   > 但如果 Windows 直接拦住了启动器/脚本本身，它们就没机会执行，仍需先手动解锁被拦的那一个文件。
+2. **换一种解压方式**：`Expand-Archive` 或 `tar -xf` 解压不会传播 Internet 标记：
+
+   ```powershell
+   Expand-Archive -LiteralPath "$env:USERPROFILE\Downloads\BabelDOC-Studio-Windows-x64.zip" `
+     -DestinationPath "$env:USERPROFILE\Documents\BabelDOC-Studio"
+   ```
+
+3. **如果提示变成「已阻止可能不安全的应用」**：说明 SAC 拦的是未签名的程序（`pythonw.exe`、
+   `*.pyd`，以及包里的 `BabelDOC Studio.exe`）。SAC 没有白名单，只能在「设置 → 隐私和安全性 →
+   Windows 安全中心 → 应用和浏览器控制 → 智能应用控制」里关闭它（会降低系统防护，旧版 Windows
+   关闭后要重装系统才能再开启），或等待签名版。
+
+> [!NOTE]
+> `BabelDOC Studio.exe` 是普通可执行文件，可以参与代码签名；`Start.bat` 是脚本，没法签名。
+> **未签名版本**：优先双击 `Start.bat`（它首次运行会自动清掉包内其余文件的标记）；如果它自己被
+> 拦住了，先只解锁 `Start.bat`（右键 → 属性 → 解除锁定）再运行，剩下的交给它处理。
+> **签名版发布后**：直接双击 `BabelDOC Studio.exe` 就能通过 SAC。维护者签名流程见
+> [docs/SMART-APP-CONTROL.md](docs/SMART-APP-CONTROL.md)。
+
+完整的排查步骤、原理和维护者签名清单见
+[Windows 智能应用控制排查](docs/SMART-APP-CONTROL.md)；解压目录里也附带了一份
+`启动失败看这里.txt`。
 
 ### 从源码运行
 
@@ -93,6 +136,10 @@ python app.py
 python app.py                 # 启动服务并打开应用窗口
 python app.py --server-only   # 只启动本地服务，用浏览器访问 http://127.0.0.1:8765
 ```
+
+> [!NOTE]
+> 在开启智能应用控制的 Windows 11 上，源码运行也可能被拦：`PyMuPDF` 等扩展模块（`.pyd`）
+> 没有签名。处理方式见 [docs/SMART-APP-CONTROL.md](docs/SMART-APP-CONTROL.md)。
 
 ### 第一次翻译
 
@@ -224,6 +271,14 @@ python app.py --server-only   # 只启动本地服务，用浏览器访问 http:
 
 ## 常见问题
 
+### 启动时提示「智能应用控制已阻止…」怎么办？
+
+这是 Windows 11 **智能应用控制（SAC）** 的拦截，不是安装包损坏。先用
+[解压与「智能应用控制」](#解压与智能应用控制) 里的办法清掉文件的「来自 Internet」标记；
+如果提示变成「已阻止可能不安全的应用」，说明 SAC 拦的是未签名的 `pythonw.exe` / `*.pyd`，
+SAC 没有白名单，只能关闭它或使用签名版。完整的排查步骤见
+[docs/SMART-APP-CONTROL.md](docs/SMART-APP-CONTROL.md)。
+
 ### 没有 API Key 可以用吗？
 
 可以。翻译设置里选择「Google 翻译（免费）」即可预览排版；也可以在本机安装 Ollama
@@ -298,6 +353,9 @@ BabelDOC Studio 把这条链路收进一个本地桌面应用：
    可以点「重新识别」重试，或在有 PDF 书签的文件上使用。
 11. 回答里的页码由模型按给定材料标注，再由本机校验并补全引用片段；极少数压缩或特殊排版的
    PDF 可能定位不到原文，此时会跳到对应页而不是高亮具体行。
+12. 免安装包目前**未做代码签名**，Windows 11 智能应用控制（SAC）开启时会被拦截；
+   处理办法见 [解压与「智能应用控制」](#解压与智能应用控制) 和
+   [docs/SMART-APP-CONTROL.md](docs/SMART-APP-CONTROL.md)。
 
 ## 开发
 
@@ -331,7 +389,7 @@ web/
   styles.css / viewer.css
   pdfjs/                PDF.js 本地副本
 tests/                  离线测试与阅读器 UI 冒烟
-tools/                  图标、便携包构建、快捷方式
+tools/                  图标、便携包构建、签名与快捷方式
 docs/screenshots/       文档截图
 ```
 
@@ -349,13 +407,23 @@ python tests/reader_ui_smoke.py
 # AI 助读 + 自动目录 UI 冒烟（Playwright + Edge）
 python tests/reader_ai_toc_ui.py
 
-# 构建 Windows 免安装包
+# 构建 Windows 免安装包（未签名）
 python tools/build_portable.py
+
+# 审计包内 390 个 exe / dll / pyd 的签名状态
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/sign_release.ps1 `
+  -Path dist/BabelDOC-Studio-Windows-x64 -Mode Audit
+
+# 带代码签名构建（需要证书，先看 docs/SMART-APP-CONTROL.md）
+$env:SIGN_CERT_THUMBPRINT = '<证书指纹>'
+python tools/build_portable.py --sign
 ```
 
 > [!NOTE]
 > 构建产物在 `dist/BabelDOC-Studio-Windows-x64.zip`，并生成对应的 SHA-256 校验文件；
-> 打包脚本不会复制个人设置、密钥或论文。
+> 打包脚本不会复制个人设置、密钥或论文。构建会用 Windows 自带的 .NET Framework `csc.exe`
+> 编译 `BabelDOC Studio.exe` 启动器（找不到时退化为 `Start.bat`）。未签名的包在开启 Windows 11
+> 智能应用控制的机器上会被拦截，发版前请按 [docs/SMART-APP-CONTROL.md](docs/SMART-APP-CONTROL.md) 检查签名状态。
 
 ## 参与贡献
 

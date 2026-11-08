@@ -17,7 +17,39 @@ jobs:
       - run: python -m pip install -r requirements-portable.txt pytest pillow
       - run: python -m pytest -q
       - run: python tools/make_icon.py
-      - run: python tools/build_portable.py
+      - name: Detect code-signing secrets
+        id: signing
+        shell: pwsh
+        env:
+          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
+        run: |
+          if ($env:SIGN_PFX_BASE64) {
+            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+      - name: Import code-signing certificate (optional)
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        env:
+          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
+          SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
+          $password = ConvertTo-SecureString $env:SIGN_PFX_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          "SIGN_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Remove-Item $pfx -Force
+      - name: Build portable package
+        shell: pwsh
+        run: |
+          if ($env:SIGN_CERT_THUMBPRINT) {
+            python tools/build_portable.py --sign
+          } else {
+            python tools/build_portable.py
+            Write-Host "::warning::No code-signing certificate configured. The package is unsigned and Windows 11 Smart App Control will block it; see docs/SMART-APP-CONTROL.md."
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: BabelDOC-Studio-Windows-x64
@@ -28,7 +60,17 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
         shell: pwsh
         run: |
           $assets = Get-ChildItem dist -File | Where-Object { $_.Extension -in '.zip', '.sha256' }
-          gh release create "$env:GITHUB_REF_NAME" $assets.FullName --draft --generate-notes
+          $notes = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          $header = Get-Content docs/release-notes-header.md -Raw
+          $generated = gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f tag_name=$env:RELEASE_TAG --jq .body
+          $shaLine = ''
+          $shaFile = Get-ChildItem dist -File -Filter '*.zip.sha256' | Select-Object -First 1
+          if ($shaFile) {
+            $shaLine = "**SHA-256**`n" + '```' + "`n" + (Get-Content $shaFile.FullName -Raw).Trim() + "`n" + '```'
+          }
+          ($header + "`n`n" + $generated + "`n`n" + $shaLine) | Out-File -FilePath $notes -Encoding utf8
+          gh release create $env:RELEASE_TAG $assets.FullName --draft --notes-file $notes

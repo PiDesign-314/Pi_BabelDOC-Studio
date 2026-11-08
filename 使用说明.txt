@@ -1,6 +1,26 @@
 BabelDOC PDF 翻译器（中文界面）
 ================================
 
+启动被 Windows 拦住？
+----------------------
+免安装版解压后双击 Start.bat 启动（签名版会改用 BabelDOC Studio.exe）。
+Start.bat 和 BabelDOC Studio.exe 首次运行时会自动清除包内文件的「来自 Internet」标记，
+所以多数情况下不需要手动输入命令；只有它们本身被 Windows 拦住时，才需要执行下面第 1 步。
+如果提示「智能应用控制已阻止可能不安全的文件」或「…可能不安全的应用」，
+是 Windows 11 的智能应用控制（SAC）在拦截从网上下载的文件/程序，不是安装包损坏。
+按下面顺序处理：
+
+1. 清掉「来自 Internet」标记：打开解压后的文件夹，空白处右键 →「在终端中打开」，
+   粘贴并回车：Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue | Unblock-File
+   然后重新双击 Start.bat。也可以只对被拦的文件右键 → 属性 → 勾选「解除锁定」。
+2. 以后解压时：先右键 ZIP → 属性 → 勾选「解除锁定」再解压；或改用 PowerShell 解压
+   （Expand-Archive 不会传播 Internet 标记）。
+3. 如果提示变成「已阻止可能不安全的应用」，说明 SAC 拦的是未签名的程序（本包目前未做
+   代码签名）。SAC 没有白名单，只能关闭智能应用控制（设置 → 隐私和安全性 → Windows 安全中心
+   → 应用和浏览器控制 → 智能应用控制 → 关闭；会降低系统防护），或等签名版发布。
+
+详细说明见 README.md，或 https://github.com/PiDesign-314/Pi_BabelDOC-Studio/blob/main/docs/SMART-APP-CONTROL.md
+
 使用方法：
 1. 双击桌面的“BabelDOC 翻译器”。
 2. 把 PDF 拖进窗口中央的上传区域（也可以直接点它选择文件）。
