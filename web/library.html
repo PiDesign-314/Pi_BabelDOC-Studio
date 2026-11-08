@@ -9,6 +9,7 @@
 <link rel="icon" href="/favicon.svg?v=140" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/styles.css">
 <link rel="stylesheet" href="/assets/library.css">
+<link rel="stylesheet" href="/assets/library-notes.css">
 </head>
 <body class="lib-page">
 
@@ -22,6 +23,10 @@
       </div>
     </div>
     <div class="topbar-right">
+      <div class="segmented lib-view-switch" id="view-switch" role="group" aria-label="切换视图">
+        <button type="button" data-view="results" class="on" aria-pressed="true">结果</button>
+        <button type="button" data-view="notes" aria-pressed="false">笔记</button>
+      </div>
       <a class="pill-btn" href="/">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
              stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -139,6 +144,68 @@
       </div>
     </div>
   </section>
+
+  <section class="notes-view" id="notes-view" aria-label="笔记" hidden>
+    <aside class="lib-rail notes-rail" aria-label="笔记分类">
+      <div class="rail-block" id="notes-rail-block"></div>
+      <div class="rail-head">
+        <span>分类</span>
+      </div>
+      <div class="rail-list" id="notes-rail-list"></div>
+      <p class="rail-hint">悬浮分类可重命名或删除。</p>
+      <p class="rail-empty" id="notes-rail-empty" hidden>还没有分类。</p>
+    </aside>
+
+    <div class="notes-main">
+      <div class="lib-head notes-head">
+        <h2 class="large-title">
+          <span id="notes-title">全部笔记</span>
+          <span class="lib-count" id="notes-count">0</span>
+        </h2>
+        <p class="page-sub" id="notes-sub">按来源文献分组；在阅读器里存的笔记会自动出现在这里。</p>
+      </div>
+
+      <div class="lib-controls notes-controls">
+        <label class="lib-search">
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
+               stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.6"/>
+            <path d="m10.5 10.5 3 3"/>
+          </svg>
+          <input id="notes-search" type="search" placeholder="搜索笔记…" spellcheck="false"
+                 autocomplete="off" aria-label="搜索笔记">
+        </label>
+
+        <button class="btn btn-secondary" id="notes-new-cat" type="button">
+          <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <path d="M7 2.2v9.6M2.2 7h9.6"/>
+          </svg>
+          新建分类
+        </button>
+      </div>
+
+      <div class="notes-groups" id="notes-groups" aria-live="polite"></div>
+
+      <div class="lib-empty notes-empty" id="notes-empty" hidden>
+        <div class="lib-empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 48 48" width="40" height="40" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 8.5h18.5L38 16v23.5a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2v-29a2 2 0 0 1 2-2Z"/>
+            <path d="M30 8.5V16h7.5"/>
+            <path d="M16 23h13M16 29h13M16 35h8"/>
+          </svg>
+        </div>
+        <h3 id="notes-empty-title">还没有笔记</h3>
+        <p id="notes-empty-text">在阅读器选中文字或 AI 回复里点「存为笔记」，之后会出现在这里。</p>
+        <div class="lib-empty-actions">
+          <button class="btn btn-secondary" id="notes-retry" type="button" hidden>重新加载</button>
+        </div>
+      </div>
+
+      <p class="notes-loading" id="notes-loading" hidden>正在加载笔记…</p>
+    </div>
+  </section>
 </main>
 
 <div class="lib-pop" id="collect-pop" hidden>
@@ -155,6 +222,7 @@
 
 <script src="/assets/shared.js"></script>
 <script src="/assets/library.js"></script>
+<script src="/assets/library-notes.js"></script>
 <script src="/assets/context-menu.js"></script>
 </body>
 </html>

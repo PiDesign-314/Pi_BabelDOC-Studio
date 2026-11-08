@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="/assets/viewer.css">
 <link rel="stylesheet" href="/assets/reader-toc.css">
 <link rel="stylesheet" href="/assets/reader-ai.css">
+<link rel="stylesheet" href="/assets/notes.css">
 </head>
 <body class="reader">
 
@@ -70,6 +71,15 @@
         <path d="M15.4 13.2l.65 1.75 1.75.65-1.75.65-.65 1.75-.65-1.75-1.75-.65 1.75-.65z"/>
       </svg>
       AI 助读
+    </button>
+
+    <button class="r-btn wide" id="btn-notes" type="button" aria-pressed="false" title="笔记：Markdown 记录，可停靠或悬浮">
+      <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 2.8h8.2a1.6 1.6 0 0 1 1.6 1.6v11.2a1.6 1.6 0 0 1-1.6 1.6H5a1.6 1.6 0 0 1-1.6-1.6V4.4A1.6 1.6 0 0 1 5 2.8Z"/>
+        <path d="M7.2 7h5.6M7.2 10h5.6M7.2 13h3.4"/>
+      </svg>
+      笔记
     </button>
 
     <button class="r-btn r-side-toggle" id="btn-sidebar" type="button" aria-pressed="true" title="显示 / 隐藏侧栏">
@@ -167,6 +177,8 @@
   </main>
 
   <aside class="r-ai" id="ai-drawer" hidden aria-label="AI 助读">
+    <div class="r-ai-resize" id="ai-resize" role="separator" aria-orientation="vertical"
+         title="拖动调整 AI 面板宽度"></div>
     <header class="r-ai-head">
       <span class="r-ai-title">AI 助读</span>
       <span class="r-ai-provider" id="ai-provider-pill">检测中…</span>
@@ -189,6 +201,8 @@
     </form>
     <div class="r-ai-settings" id="ai-settings" hidden></div>
   </aside>
+
+  <aside class="r-notes" id="notes-drawer" hidden aria-label="笔记"></aside>
 </div>
 
 <div class="r-sel" id="sel-toolbar" hidden>
@@ -205,6 +219,7 @@
   <span class="r-vsep"></span>
   <div class="r-sel-style" id="sel-styles" role="group" aria-label="标记样式"></div>
   <span class="r-vsep"></span>
+  <button class="r-sel-action" id="sel-notebook" type="button">存笔记</button>
   <button class="r-sel-action" id="sel-note" type="button">写批注</button>
   <button class="r-sel-action" id="sel-copy" type="button">复制</button>
 </div>
@@ -243,5 +258,6 @@
 <script src="/assets/viewer.js"></script>
 <script src="/assets/reader-toc.js"></script>
 <script src="/assets/reader-ai.js"></script>
+<script src="/assets/notes.js"></script>
 </body>
 </html>

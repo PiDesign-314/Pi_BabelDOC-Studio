@@ -106,6 +106,7 @@
     error: $("#error"),
     selToolbar: $("#sel-toolbar"),
     selNote: $("#sel-note"),
+    selNotebook: $("#sel-notebook"),
     selCopy: $("#sel-copy"),
     editor: $("#editor"),
     editorPage: $("#editor-page"),
@@ -1391,7 +1392,7 @@
         band.h = Math.max(2, band.h - overlap);
       }
     }
-    return bands;
+    return mergeLineBands(bands);
   }
 
   function legacyBands(rects) {
@@ -1430,6 +1431,59 @@
     });
   }
 
+  /* Stored rectangles can contain several overlapping boxes per text line (a
+     selection made across spans, or a highlight created before the text layer
+     was ready).  Painting each box separately lets the translucent marks
+     multiply into darker patches; merge every line into exactly one band
+     first, then trim the tiny vertical overlaps between neighbouring lines. */
+  function mergeLineBands(bands) {
+    const pieces = (bands || [])
+      .map((band) => ({
+        x: Number(band.x) || 0,
+        y: Number(band.y) || 0,
+        w: Number(band.w) || 0,
+        h: Number(band.h) || 0,
+      }))
+      .filter((band) => band.w > 0.2 && band.h > 0.2)
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    const lines = [];
+    for (const piece of pieces) {
+      const top = piece.y;
+      const bottom = piece.y + piece.h;
+      const line = lines.find((entry) => {
+        const overlap = Math.min(entry.bottom, bottom) - Math.max(entry.top, top);
+        return overlap > Math.min(entry.bottom - entry.top, piece.h) * 0.5;
+      });
+      if (!line) {
+        lines.push({ left: piece.x, right: piece.x + piece.w, top, bottom });
+        continue;
+      }
+      line.left = Math.min(line.left, piece.x);
+      line.right = Math.max(line.right, piece.x + piece.w);
+      line.top = Math.min(line.top, top);
+      line.bottom = Math.max(line.bottom, bottom);
+    }
+    const merged = lines
+      .map((line) => ({
+        x: line.left,
+        y: line.top,
+        w: line.right - line.left,
+        h: line.bottom - line.top,
+      }))
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    for (let index = 1; index < merged.length; index += 1) {
+      const previous = merged[index - 1];
+      const band = merged[index];
+      const below = previous.y + previous.h + 0.15;
+      if (band.y < below) {
+        const overlap = below - band.y;
+        band.y += overlap;
+        band.h = Math.max(1.5, band.h - overlap);
+      }
+    }
+    return merged;
+  }
+
   /* Annotation geometry is cached per item: ``legacyBands`` merges the stored
      rectangles into one band per text line, and that never changes until the
      annotation itself is replaced. */
@@ -1443,7 +1497,7 @@
   function bandsOf(item) {
     let bands = BANDS.get(item);
     if (!bands) {
-      bands = legacyBands(item.rects || []);
+      bands = mergeLineBands(legacyBands(item.rects || []));
       BANDS.set(item, bands);
     }
     return bands;
@@ -1484,7 +1538,7 @@
         for (const rect of rects) {
           if ((rect.page || item.page) === sheet.no) out.push(rect);
         }
-        if (out.length) return out;
+        if (out.length) return mergeLineBands(out);
       } else if (item.page === sheet.no) {
         const pages = pagesOfItem(item);
         if (pages.length === 1 || !(item.ranges && item.ranges.length)) {
@@ -2527,6 +2581,18 @@
       event.stopPropagation();
       const item = highlightSelection("pink");
       if (item) openEditor(item.id, event);
+    });
+    el.selNotebook.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const captured = state.pending || captureSelection();
+      if (!captured) return;
+      if (window.ReaderNotes && typeof window.ReaderNotes.createFromSelection === "function") {
+        window.ReaderNotes.createFromSelection(captured);
+      } else {
+        toast("笔记脚本没有加载，请刷新重试", "bad");
+      }
+      window.getSelection().removeAllRanges();
+      hideSelectionToolbar();
     });
     el.selCopy.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -4140,6 +4206,7 @@
           )
           .join("")}</div>` +
         '<hr class="r-menu-hr">' +
+        `<button type="button" class="r-menu-item" data-menu-act="note-save">${icon("note", 14)}存为笔记</button>` +
         `<button type="button" class="r-menu-item" data-menu-act="note">${icon("note", 14)}写批注…</button>` +
         `<button type="button" class="r-menu-item" data-menu-act="ai-ask">${icon("spark", 14)}引用提问…</button>` +
         `<button type="button" class="r-menu-item" data-menu-act="ai-explain">${icon("spark", 14)}解释这段</button>` +
@@ -4179,6 +4246,15 @@
             window.ReaderAI.quote(captured, { question });
           } else {
             toast("AI 助读脚本没有加载，请刷新重试", "bad");
+          }
+          return;
+        }
+        if (act === "note-save") {
+          el.menu.hidden = true;
+          if (window.ReaderNotes && typeof window.ReaderNotes.createFromSelection === "function") {
+            window.ReaderNotes.createFromSelection(captured);
+          } else {
+            toast("笔记脚本没有加载，请刷新重试", "bad");
           }
           return;
         }

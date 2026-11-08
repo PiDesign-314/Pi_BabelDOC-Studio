@@ -105,6 +105,50 @@
     return `babeldoc-ai:${docPath()}`;
   }
 
+  const WIDTH_KEY = "babeldoc-ai-width";
+
+  /* Drag the left edge of the AI panel to change its width; keep the value for
+     the next opening. The PDF stage is a flex sibling, so it reflows itself. */
+  function installResize() {
+    const handle = $("#ai-resize");
+    if (!handle || !els.drawer) return;
+    try {
+      const saved = Number(window.localStorage.getItem(WIDTH_KEY));
+      if (saved >= 300 && saved <= 900) els.drawer.style.setProperty("--r-ai-w", `${saved}px`);
+    } catch {
+      /* localStorage can be unavailable in private windows */
+    }
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+    const stop = () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove("dragging");
+      document.body.classList.remove("r-ai-resizing");
+      const width = parseFloat(els.drawer.style.getPropertyValue("--r-ai-w")) || 380;
+      try { window.localStorage.setItem(WIDTH_KEY, String(Math.round(width))); } catch { /* ignore */ }
+    };
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      dragging = true;
+      startX = event.clientX;
+      startWidth = els.drawer.getBoundingClientRect().width;
+      handle.classList.add("dragging");
+      document.body.classList.add("r-ai-resizing");
+      try { handle.setPointerCapture(event.pointerId); } catch { /* older browsers */ }
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      const max = Math.max(360, window.innerWidth - 360);
+      const width = Math.min(max, Math.max(300, startWidth - (event.clientX - startX)));
+      els.drawer.style.setProperty("--r-ai-w", `${Math.round(width)}px`);
+    });
+    handle.addEventListener("pointerup", stop);
+    handle.addEventListener("pointercancel", stop);
+  }
+
   /* ---------------------------------------------------------- bootstrap -- */
   function boot() {
     els.drawer = $("#ai-drawer");
@@ -126,6 +170,7 @@
     els.settings = $("#ai-settings");
 
     installChrome();
+    installResize();
     bindEvents();
     updateProviderUI();
     renderSuggest();
@@ -617,6 +662,28 @@
     const meta = metaLine(message);
     if (meta) node.append(meta);
     if (node.__citations.length) node.append(citesBlock(node.__citations));
+    const actions = document.createElement("div");
+    actions.className = "r-ai-actions";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "r-ai-save-note";
+    save.textContent = "存为笔记";
+    save.title = "把这条回答保存到笔记（Markdown）";
+    save.addEventListener("click", () => {
+      if (!window.ReaderNotes || typeof window.ReaderNotes.createFromAI !== "function") {
+        toast("笔记脚本没有加载，请刷新重试", "bad");
+        return;
+      }
+      const page = node.__citations.length
+        ? Number(node.__citations[0].page) || 0
+        : Number(state.quote && state.quote.page) || 0;
+      window.ReaderNotes.createFromAI({
+        markdown: String(message.content || ""),
+        page,
+      });
+    });
+    actions.append(save);
+    node.append(actions);
     return node;
   }
 
@@ -1046,7 +1113,12 @@
       if (settings.provider === "api") {
         label = String(settings.model || "").trim() || "API";
       } else if (settings.provider === "auto") {
-        label = "自动";
+        /* 「自动」会实际落到某个本机 CLI；底部按钮跟顶部状态保持一致，
+           用户一眼就知道这次是谁在回答。 */
+        const providers = statusProviders();
+        const ready = providers.find((item) => item.available && item.logged_in);
+        const name = ready ? (PROVIDER_SHORT[ready.id] || ready.name) : "";
+        label = name ? `自动 · ${name}` : "自动";
       } else {
         label = PROVIDER_SHORT[settings.provider] || providerLabel(settings.provider);
       }

@@ -35,6 +35,7 @@ from core import (  # noqa: E402
     fonts,
     glossary,
     library,
+    notes,
     pdfexport,
     pdfinfo,
     presets,
@@ -46,10 +47,10 @@ from core.languages import LANGUAGES  # noqa: E402
 
 WEB_DIR = BASE_DIR / "web"
 
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 # The reader checks these before trusting the server with the newer annotation
 # types; a stale process keeps an old API alive and silently drops them.
-API_FEATURES = ("text", "ink", "styles", "fonts", "margin-notes", "toc", "ai-reader")
+API_FEATURES = ("text", "ink", "styles", "fonts", "margin-notes", "toc", "ai-reader", "notes")
 
 
 def _build_id() -> int:
@@ -1095,6 +1096,103 @@ def test_connection():
         )
     except Exception as exc:
         return _json({"ok": False, "message": str(exc)}, 200)
+
+
+# --------------------------------------------------------------------------- #
+# Notes
+# --------------------------------------------------------------------------- #
+def _notes_payload() -> dict:
+    payload = request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else {}
+
+
+@app.get("/api/notes")
+def notes_index():
+    category = request.args.get("category")
+    if category is not None and not category.strip():
+        category = None
+    path = request.args.get("path")
+    if path is not None and not path.strip():
+        path = None
+    return _json(
+        notes.list_notes(
+            query=request.args.get("q") or "",
+            category_id=category,
+            path=path,
+        )
+    )
+
+
+@app.post("/api/notes")
+def notes_create():
+    payload = _notes_payload()
+    try:
+        note = notes.create_note(
+            title=payload.get("title") or "",
+            body=payload.get("body") or "",
+            category_id=payload.get("category_id") or "",
+            source=payload.get("source"),
+        )
+    except ValueError as exc:
+        return _error(str(exc), 400)
+    return _json({"note": note})
+
+
+@app.patch("/api/notes/<note_id>")
+def notes_update(note_id: str):
+    payload = _notes_payload()
+    fields = {
+        key: payload[key]
+        for key in ("title", "body", "category_id", "source")
+        if key in payload
+    }
+    try:
+        note = notes.update_note(note_id, **fields)
+    except LookupError as exc:
+        return _error(str(exc), 404)
+    except ValueError as exc:
+        return _error(str(exc), 400)
+    return _json({"note": note})
+
+
+@app.delete("/api/notes/<note_id>")
+def notes_delete(note_id: str):
+    try:
+        notes.delete_note(note_id)
+    except LookupError as exc:
+        return _error(str(exc), 404)
+    return _json({"ok": True})
+
+
+@app.post("/api/notes/categories")
+def notes_create_category():
+    payload = _notes_payload()
+    try:
+        category = notes.create_category(payload.get("name") or "")
+    except ValueError as exc:
+        return _error(str(exc), 400)
+    return _json({"category": category, "categories": notes.list_categories()})
+
+
+@app.patch("/api/notes/categories/<category_id>")
+def notes_rename_category(category_id: str):
+    payload = _notes_payload()
+    try:
+        category = notes.rename_category(category_id, payload.get("name") or "")
+    except LookupError as exc:
+        return _error(str(exc), 404)
+    except ValueError as exc:
+        return _error(str(exc), 400)
+    return _json({"category": category, "categories": notes.list_categories()})
+
+
+@app.delete("/api/notes/categories/<category_id>")
+def notes_delete_category(category_id: str):
+    try:
+        notes.delete_category(category_id)
+    except LookupError as exc:
+        return _error(str(exc), 404)
+    return _json({"categories": notes.list_categories()})
 
 
 # --------------------------------------------------------------------------- #
