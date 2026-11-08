@@ -230,6 +230,10 @@
       } else {
         goToPage(1, false);
       }
+      document.dispatchEvent(
+        new CustomEvent("reader:ready", { detail: { pages: state.pages } })
+      );
+      resolveReaderReady();
     } catch (error) {
       showError(`无法打开这个 PDF：${error.message || error}`);
     }
@@ -238,6 +242,7 @@
   function showError(message) {
     el.loading.hidden = true;
     el.pages.hidden = true;
+    resolveReaderReady();
     el.error.hidden = false;
     const back = origin === "app" ? "/" : "/library";
     el.error.innerHTML =
@@ -1041,6 +1046,9 @@
     el.fit.textContent = state.fit === "width" ? "适应页面" : "适应宽度";
     updateThumbSelection();
     rememberPosition();
+    document.dispatchEvent(
+      new CustomEvent("reader:pagechange", { detail: { page: state.page } })
+    );
   }
 
   /* Reopening a paper should land where reading stopped, not on page 1. */
@@ -2667,6 +2675,7 @@
     up: '<path d="M10 15V5M6 9l4-4 4 4"/>',
     down: '<path d="M10 5v10M6 11l4 4 4-4"/>',
     copy: '<rect x="6.5" y="6.5" width="9" height="9" rx="1.6"/><path d="M4.5 12.5H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h7.5a1 1 0 0 1 1 1v.5"/>',
+    spark: '<path d="M10 2.6l1.55 4.25L15.8 8.4l-4.25 1.55L10 14.2 8.45 9.95 4.2 8.4l4.25-1.55z"/><path d="M15.4 13.2l.65 1.75 1.75.65-1.75.65-.65 1.75-.65-1.75-1.75-.65 1.75-.65z"/>',
     trash: '<path d="M4.5 6h11M8 6V4.2h4V6M6.2 6l.7 10h6.2l.7-10M8.6 9v4M11.4 9v4"/>',
     edit: '<path d="M13.6 3.4 16.6 6.4 7.8 15.2l-4 1 1-4z"/>',
     search: '<circle cx="8.6" cy="8.6" r="4.6"/><path d="m12.2 12.2 4 4"/>',
@@ -4132,6 +4141,8 @@
           .join("")}</div>` +
         '<hr class="r-menu-hr">' +
         `<button type="button" class="r-menu-item" data-menu-act="note">${icon("note", 14)}写批注…</button>` +
+        `<button type="button" class="r-menu-item" data-menu-act="ai-ask">${icon("spark", 14)}引用提问…</button>` +
+        `<button type="button" class="r-menu-item" data-menu-act="ai-explain">${icon("spark", 14)}解释这段</button>` +
         `<button type="button" class="r-menu-item" data-menu-act="copy">${icon("copy", 14)}复制文字</button>`;
       menuAt(event);
       el.menu.onclick = (click) => {
@@ -4157,7 +4168,21 @@
           return;
         }
         if (!action) return;
-        if (action.dataset.menuAct === "copy") {
+        const act = action.dataset.menuAct;
+        if (act === "ai-ask" || act === "ai-explain") {
+          el.menu.hidden = true;
+          const question =
+            act === "ai-explain"
+              ? "请解释这段在论文里是什么意思，以及它和上下文的关系。"
+              : "";
+          if (window.ReaderAI && typeof window.ReaderAI.quote === "function") {
+            window.ReaderAI.quote(captured, { question });
+          } else {
+            toast("AI 助读脚本没有加载，请刷新重试", "bad");
+          }
+          return;
+        }
+        if (act === "copy") {
           navigator.clipboard.writeText(captured.text).then(
             () => toast("已复制选中文字", "good"),
             () => toast("复制失败，请使用 Ctrl+C", "bad")
@@ -4222,13 +4247,23 @@
               14
             )}${item.label}</button>`;
           })
-          .join("");
+          .join("") +
+        '<hr class="r-menu-hr">' +
+        `<button type="button" class="r-menu-item" data-menu-tool="ai-page">${icon("spark", 14)}总结这一页（AI）</button>`;
       menuAt(event);
       el.menu.onclick = (click) => {
         const button = click.target.closest("[data-menu-tool]");
         if (!button) return;
         el.menu.hidden = true;
         const tool = button.dataset.menuTool;
+        if (tool === "ai-page") {
+          if (window.ReaderAI && typeof window.ReaderAI.open === "function") {
+            window.ReaderAI.open({ page: state.page });
+          } else {
+            toast("AI 助读脚本没有加载，请刷新重试", "bad");
+          }
+          return;
+        }
         if (tool === "note") {
           if (!state.noteTool) el.noteTool.click();
         } else setDrawingTool(tool);
@@ -4371,6 +4406,148 @@
       if (state.noteTool) endTextEdit();
     });
   }
+
+  /* ---------------------------------------------------- AI reader bridge -- */
+  /* The AI panel and the table-of-contents panel live in their own scripts.
+     They get exactly the reader internals they need through this small bridge
+     instead of reaching into the closure. */
+  let readyResolve = null;
+  const readerReady = new Promise((resolve) => {
+    readyResolve = resolve;
+  });
+  function resolveReaderReady() {
+    if (!readyResolve) return;
+    const done = readyResolve;
+    readyResolve = null;
+    done();
+  }
+
+  async function ensureTextReady(sheet) {
+    if (!sheet || !state.pdf) return false;
+    if (sheet.textReady && sheet.textScale === state.scale) return true;
+    const page = await state.pdf.getPage(sheet.no);
+    const viewport = page.getViewport({ scale: state.scale });
+    if (!sheet.painted) await paint(sheet);
+    await buildText(sheet, page, viewport);
+    sheet.textScale = state.scale;
+    return Boolean(sheet.textReady);
+  }
+
+  function rectsForOffsets(sheet, start, end) {
+    const box = sheet.box.getBoundingClientRect();
+    const rects = [];
+    let offset = 0;
+    for (const node of nodesOf(sheet)) {
+      const length = node.data.length;
+      const nodeStart = offset;
+      offset += length;
+      const from = Math.max(start, nodeStart);
+      const to = Math.min(end, nodeStart + length);
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(node, from - nodeStart);
+      range.setEnd(node, to - nodeStart);
+      for (const rect of range.getClientRects()) {
+        if (rect.width < 0.5 || rect.height < 0.5) continue;
+        rects.push({
+          x: (rect.left - box.left) / state.scale,
+          y: (rect.top - box.top) / state.scale,
+          w: rect.width / state.scale,
+          h: rect.height / state.scale,
+        });
+      }
+    }
+    return rects;
+  }
+
+  const FLASH_STYLE_ID = "r-flash-style";
+  function installFlashStyle() {
+    if (document.getElementById(FLASH_STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = FLASH_STYLE_ID;
+    style.textContent =
+      "@keyframes r-flash-fade{0%{opacity:0}12%{opacity:1}70%{opacity:1}100%{opacity:0}}" +
+      ".r-flash-layer{position:absolute;inset:0;pointer-events:none;z-index:6}" +
+      ".r-flash-mark{position:absolute;border-radius:3px;background:rgba(255,196,66,.55);" +
+      "box-shadow:0 0 0 2px rgba(255,170,0,.35);animation:r-flash-fade 2.6s ease forwards}";
+    document.head.append(style);
+  }
+
+  /* Jump to a page and highlight the quoted text for a couple of seconds.
+     Used by AI citations and the table of contents; it never writes an
+     annotation, so browsing an answer leaves the document untouched. */
+  async function flashText(page, text, opts = {}) {
+    const target = clamp(Math.round(Number(page)) || 1, 1, state.pages || 1);
+    const sheet = state.sheets[target - 1];
+    if (!sheet) return false;
+    installFlashStyle();
+    goToPage(target, false);
+    const needle = String(text || "").trim();
+    if (!needle) return true;
+    try {
+      await ensureTextReady(sheet);
+    } catch {
+      return false;
+    }
+    let span = findOffsets(sheet, needle);
+    if (!span && needle.length > 28) span = findOffsets(sheet, needle.slice(0, 28));
+    if (!span && opts.fallbackText) span = findOffsets(sheet, String(opts.fallbackText));
+    const rects = span ? rectsForOffsets(sheet, span.start, span.end) : [];
+    if (!rects.length) return false;
+    const layer = document.createElement("div");
+    layer.className = "r-flash-layer";
+    for (const rect of rects) {
+      const mark = document.createElement("span");
+      mark.className = "r-flash-mark";
+      mark.style.left = `${rect.x * state.scale}px`;
+      mark.style.top = `${rect.y * state.scale}px`;
+      mark.style.width = `${rect.w * state.scale}px`;
+      mark.style.height = `${rect.h * state.scale}px`;
+      layer.append(mark);
+    }
+    sheet.box.append(layer);
+    const top =
+      (state.tops ? state.tops[target - 1] : 0) +
+      (rects[0].y + rects[0].h) * state.scale -
+      el.stage.clientHeight * 0.32;
+    el.stage.scrollTo({
+      top: Math.max(0, top),
+      behavior: reduceMotion() ? "auto" : "smooth",
+    });
+    window.setTimeout(() => layer.remove(), 2800);
+    return true;
+  }
+
+  window.ReaderBridge = {
+    docPath,
+    pageCount: () => state.pages,
+    currentPage: () => state.page,
+    goToPage: (number, smooth = true) => goToPage(number, smooth),
+    getPdf: () => state.pdf || null,
+    getPageText: (page) => {
+      const sheet = state.sheets[Number(page) - 1];
+      return sheet && sheet.textReady ? sheetText(sheet) : "";
+    },
+    getSelection: () => {
+      try {
+        return captureSelection();
+      } catch {
+        return null;
+      }
+    },
+    flashText: (page, text, opts) => flashText(page, text, opts || {}),
+    refit: () => {
+      if (state.fit) relayout(scrollAnchor());
+    },
+    whenReady: () => readerReady,
+    onPageChange: (callback) => {
+      const handler = (event) => callback(event.detail.page);
+      document.addEventListener("reader:pagechange", handler);
+      return () => document.removeEventListener("reader:pagechange", handler);
+    },
+    version: 1,
+  };
+
   bindEvents();
   setupReaderTools();
   boot();

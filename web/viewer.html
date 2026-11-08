@@ -9,6 +9,8 @@
 <link rel="icon" href="/favicon.svg?v=140" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/styles.css">
 <link rel="stylesheet" href="/assets/viewer.css">
+<link rel="stylesheet" href="/assets/reader-toc.css">
+<link rel="stylesheet" href="/assets/reader-ai.css">
 </head>
 <body class="reader">
 
@@ -60,6 +62,15 @@
     </div>
 
     <span class="r-saved" id="save-state"></span>
+
+    <button class="r-btn wide r-ai-toggle" id="btn-ai" type="button" aria-pressed="false" title="AI 助读（选中原文右键引用提问）">
+      <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M10 2.6l1.55 4.25L15.8 8.4l-4.25 1.55L10 14.2 8.45 9.95 4.2 8.4l4.25-1.55z"/>
+        <path d="M15.4 13.2l.65 1.75 1.75.65-1.75.65-.65 1.75-.65-1.75-1.75-.65 1.75-.65z"/>
+      </svg>
+      AI 助读
+    </button>
 
     <button class="r-btn r-side-toggle" id="btn-sidebar" type="button" aria-pressed="true" title="显示 / 隐藏侧栏">
       <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
@@ -136,9 +147,11 @@
   <aside class="r-side" id="sidebar">
     <div class="r-tabs" role="tablist">
       <button class="r-tab on" type="button" data-tab="thumbs">页面</button>
+      <button class="r-tab" type="button" data-tab="toc">目录</button>
       <button class="r-tab" type="button" data-tab="notes">批注<span class="r-count" id="anno-count">0</span></button>
     </div>
     <div class="r-panel r-panel-thumbs" id="panel-thumbs"></div>
+    <div class="r-panel r-panel-toc" id="panel-toc" hidden></div>
     <div class="r-panel r-panel-notes" id="panel-notes" hidden></div>
     <div class="r-side-resize" id="side-resize" title="拖动调整侧栏宽度" role="separator" aria-orientation="vertical"></div>
   </aside>
@@ -152,6 +165,30 @@
       <div class="r-pages" id="pages" hidden></div>
     </div>
   </main>
+
+  <aside class="r-ai" id="ai-drawer" hidden aria-label="AI 助读">
+    <header class="r-ai-head">
+      <span class="r-ai-title">AI 助读</span>
+      <span class="r-ai-provider" id="ai-provider-pill">检测中…</span>
+      <button class="r-ai-iconbtn" id="ai-settings-btn" type="button" title="模型设置" aria-label="模型设置">⚙</button>
+      <button class="r-ai-iconbtn" id="ai-close" type="button" title="关闭" aria-label="关闭">✕</button>
+    </header>
+    <div class="r-ai-body" id="ai-messages"></div>
+    <div class="r-ai-quote" id="ai-quote" hidden>
+      <span class="r-ai-quote-tag" id="ai-quote-tag"></span>
+      <p class="r-ai-quote-text" id="ai-quote-text"></p>
+      <button class="r-ai-quote-x" type="button" data-ai-quote-clear title="移除引用" aria-label="移除引用">✕</button>
+    </div>
+    <div class="r-ai-suggest" id="ai-suggest"></div>
+    <form class="r-ai-compose" id="ai-form">
+      <textarea id="ai-input" rows="2" placeholder="选中原文后提问，或直接输入问题…" spellcheck="false"></textarea>
+      <div class="r-ai-compose-foot">
+        <button type="button" class="r-ai-model" id="ai-model-btn" title="选择模型">模型：自动</button>
+        <button type="submit" class="r-ai-send" id="ai-send">发送</button>
+      </div>
+    </form>
+    <div class="r-ai-settings" id="ai-settings" hidden></div>
+  </aside>
 </div>
 
 <div class="r-sel" id="sel-toolbar" hidden>
@@ -204,5 +241,7 @@
 <script src="/assets/pdfjs/build/pdf.min.js"></script>
 <script src="/assets/shared.js"></script>
 <script src="/assets/viewer.js"></script>
+<script src="/assets/reader-toc.js"></script>
+<script src="/assets/reader-ai.js"></script>
 </body>
 </html>
