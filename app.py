@@ -1130,6 +1130,7 @@ def notes_create():
         note = notes.create_note(
             title=payload.get("title") or "",
             body=payload.get("body") or "",
+            body_html=payload.get("body_html") or "",
             category_id=payload.get("category_id") or "",
             source=payload.get("source"),
         )
@@ -1143,7 +1144,7 @@ def notes_update(note_id: str):
     payload = _notes_payload()
     fields = {
         key: payload[key]
-        for key in ("title", "body", "category_id", "source")
+        for key in ("title", "body", "body_html", "category_id", "source")
         if key in payload
     }
     try:

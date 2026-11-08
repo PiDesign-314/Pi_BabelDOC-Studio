@@ -10,9 +10,11 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import threading
 import time
 import uuid
+from html.parser import HTMLParser
 from pathlib import Path
 
 from . import config
@@ -21,6 +23,7 @@ MAX_NOTES = 5000
 MAX_CATEGORIES = 200
 MAX_TITLE = 200
 MAX_BODY = 200_000
+MAX_HTML = 400_000
 MAX_QUOTE = 4000
 MAX_LOCATION = 300
 MAX_PATH = 4096
@@ -143,6 +146,300 @@ def _check_category_name(raw, categories: list[dict], skip_id: str = "") -> str:
 
 
 # --------------------------------------------------------------------------- #
+# HTML 清洗（白名单 + 转义，供富文本编辑器使用）
+# --------------------------------------------------------------------------- #
+ALLOWED_TAGS = frozenset(
+    {
+        "p", "div", "br", "span", "strong", "b", "em", "i", "u", "s",
+        "strike", "del", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li",
+        "blockquote", "hr", "a", "code", "pre", "table", "thead", "tbody",
+        "tr", "td", "th", "mark",
+    }
+)
+# 这些标签连同内部文本一起丢弃，避免脚本 / 外部资源 / 模板注入。
+DROP_CONTENT_TAGS = frozenset(
+    {"script", "style", "iframe", "object", "embed", "svg", "math", "template"}
+)
+VOID_TAGS = frozenset({"br", "hr"})
+VOID_DROP_TAGS = frozenset({"embed"})
+BLOCK_TAGS = frozenset(
+    {
+        "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li",
+        "blockquote", "hr", "pre", "table", "thead", "tbody", "tr", "td", "th",
+    }
+)
+ALLOWED_CSS = frozenset(
+    {
+        "color", "background-color", "font-weight", "font-style",
+        "text-decoration", "text-align",
+    }
+)
+
+
+def _escape(value: str, quote: bool = False) -> str:
+    """转义文本 / 属性值中的 & < >（属性值再转义双引号）。"""
+    value = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    if quote:
+        value = value.replace('"', "&quot;")
+    return value
+
+
+def _safe_href(value: str) -> bool:
+    """只允许 http / https / mailto 链接。"""
+    lowered = value.strip().casefold()
+    return (
+        lowered.startswith("http://")
+        or lowered.startswith("https://")
+        or lowered.startswith("mailto:")
+    )
+
+
+def _clean_style(raw: str) -> str:
+    """只保留白名单 CSS 属性，危险值整条丢弃。"""
+    kept: list[str] = []
+    for declaration in raw.split(";"):
+        if ":" not in declaration:
+            continue
+        name, value = declaration.split(":", 1)
+        name = name.strip().lower()
+        value = value.strip()
+        if name not in ALLOWED_CSS or not value:
+            continue
+        lowered = value.casefold()
+        if (
+            "javascript:" in lowered
+            or "expression" in lowered
+            or re.search(r"url\s*\(", lowered)
+        ):
+            continue
+        value = re.sub(r"[\x00-\x1f\x7f]", "", value)  # 去掉控制字符
+        if value:
+            kept.append(f"{name}: {value}")
+    return "; ".join(kept)
+
+
+class _Sanitizer(HTMLParser):
+    """把任意 HTML 收敛成只含白名单标签 / 属性的闭合片段。"""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tokens: list[tuple] = []
+        self._stack: list[str] = []
+        self._dropping: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in DROP_CONTENT_TAGS:
+            if tag not in VOID_DROP_TAGS:
+                self._dropping.append(tag)
+            return
+        if self._dropping or tag not in ALLOWED_TAGS:
+            return
+        if tag in VOID_TAGS:
+            self.tokens.append(("void", tag, self._attributes(tag, attrs)))
+            return
+        self.tokens.append(("open", tag, self._attributes(tag, attrs)))
+        self._stack.append(tag)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in DROP_CONTENT_TAGS:
+            if tag in self._dropping:
+                while self._dropping:
+                    if self._dropping.pop() == tag:
+                        break
+            return
+        if self._dropping or tag not in ALLOWED_TAGS or tag in VOID_TAGS:
+            return
+        if tag not in self._stack:
+            return
+        # 顺手补上没写结束标签的内层标签，保证输出闭合良好。
+        while self._stack:
+            open_tag = self._stack.pop()
+            self.tokens.append(("close", open_tag))
+            if open_tag == tag:
+                break
+
+    def handle_data(self, data):
+        if self._dropping or not data:
+            return
+        self.tokens.append(("text", _escape(data)))
+
+    def _attributes(self, tag: str, attrs) -> str:
+        rendered: list[str] = []
+        seen: set[str] = set()
+        for name, value in attrs:
+            name = str(name or "").lower()
+            if not name or name in seen:
+                continue
+            value = value if isinstance(value, str) else ""
+            if name == "style":
+                style = _clean_style(value)
+                if style:
+                    rendered.append(f' style="{_escape(style, True)}"')
+                    seen.add(name)
+            elif tag == "a" and name in {"href", "title"}:
+                if name == "href" and not _safe_href(value):
+                    continue
+                rendered.append(f' {name}="{_escape(value, True)}"')
+                seen.add(name)
+            elif tag == "ul" and name == "class" and value.strip() == "rn-todo":
+                rendered.append(' class="rn-todo"')
+                seen.add(name)
+            elif tag == "li" and name == "data-check" and value.strip() in {"0", "1"}:
+                rendered.append(f' data-check="{value.strip()}"')
+                seen.add(name)
+        return "".join(rendered)
+
+
+def _token_html(token: tuple) -> str:
+    kind = token[0]
+    if kind == "void":
+        return f"<{token[1]}{token[2]}>"
+    if kind == "open":
+        return f"<{token[1]}{token[2]}>"
+    return f"</{token[1]}>"
+
+
+def _cut_escaped(text: str, room: int) -> str:
+    """按字符预算截断已转义文本，避免留下半个实体。"""
+    cut = text[:room]
+    amp = cut.rfind("&")
+    if amp >= 0 and ";" not in cut[amp:]:
+        cut = cut[:amp]
+    return cut
+
+
+def _render(tokens: list[tuple], limit: int) -> str:
+    """把 token 流渲染成不超长、闭合良好的 HTML。"""
+    if limit <= 0:
+        return ""
+    parts: list[str] = []
+    used = 0
+    stack: list[str] = []
+    for token in tokens:
+        closing = sum(len(tag) + 3 for tag in stack)  # 已打开标签的闭合开销
+        if token[0] == "text":
+            room = limit - used - closing
+            if room <= 0:
+                break
+            text = token[1]
+            if len(text) > room:
+                piece = _cut_escaped(text, room)
+                if piece:
+                    parts.append(piece)
+                break
+            parts.append(text)
+            used += len(text)
+            continue
+
+        chunk = _token_html(token)
+        if token[0] == "open":
+            closing_after = closing + len(token[1]) + 3
+        elif token[0] == "close":
+            closing_after = max(0, closing - (len(stack[-1]) + 3)) if stack else closing
+        else:
+            closing_after = closing
+        if used + len(chunk) + closing_after > limit:
+            break
+        parts.append(chunk)
+        used += len(chunk)
+        if token[0] == "open":
+            stack.append(token[1])
+        elif token[0] == "close" and stack:
+            stack.pop()
+
+    for tag in reversed(stack):
+        parts.append(f"</{tag}>")
+    return "".join(parts)
+
+
+def sanitize_html(raw) -> str:
+    """白名单清洗 HTML：危险标签连内容丢弃，其它未知标签丢弃但保留文字。"""
+    if not isinstance(raw, str):
+        return ""
+    parser = _Sanitizer()
+    try:
+        parser.feed(raw[:MAX_HTML])
+        parser.close()
+    except Exception:  # 解析器不应对用户内容抛错；万一抛了就用已解析部分
+        pass
+    return _render(parser.tokens, MAX_HTML)
+
+
+class _TextExtractor(HTMLParser):
+    """把 HTML 变成可搜索的纯文本。"""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._dropping: list[str] = []
+
+    def _block(self) -> None:
+        self.parts.append("\n")
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in DROP_CONTENT_TAGS:
+            if tag not in VOID_DROP_TAGS:
+                self._dropping.append(tag)
+            return
+        if self._dropping:
+            return
+        if tag == "li":
+            self._block()
+            self.parts.append("· ")
+        elif tag == "br" or tag in BLOCK_TAGS:
+            self._block()
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in DROP_CONTENT_TAGS:
+            if tag in self._dropping:
+                while self._dropping:
+                    if self._dropping.pop() == tag:
+                        break
+            return
+        if self._dropping:
+            return
+        if tag in BLOCK_TAGS:
+            self._block()
+
+    def handle_data(self, data):
+        if self._dropping or not data:
+            return
+        # HTML 源码里的换行 / 制表符在渲染时就是空格，只让块级边界产生换行。
+        self.parts.append(re.sub(r"\s+", " ", data))
+
+
+def html_to_text(value) -> str:
+    """HTML → 纯文本：块级元素换行、li 加“· ”、实体反转义、压缩空白。"""
+    raw = _text(value, MAX_HTML)
+    if not raw:
+        return ""
+    parser = _TextExtractor()
+    try:
+        parser.feed(raw)
+        parser.close()
+    except Exception:
+        pass
+    text = "".join(parser.parts)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[^\S\n]+", " ", text)  # 行内空白（含 &nbsp;）压成一个空格
+    text = re.sub(r" *\n *", "\n", text)  # 行首尾空白去掉
+    text = re.sub(r"\n+", "\n", text)
+    return text.strip()[:MAX_BODY]
+
+
+# --------------------------------------------------------------------------- #
 # 读写
 # --------------------------------------------------------------------------- #
 def _entries(value) -> list:
@@ -190,6 +487,8 @@ def _note(value, category_ids: set[str], used: set[str]) -> dict | None:
         "id": note_id,
         "title": _clean_title(value.get("title")),
         "body": _clean_body(value.get("body")),
+        # 旧笔记没有这个字段，补空字符串保持结构一致。
+        "body_html": sanitize_html(value.get("body_html")),
         "category_id": category_id,
         "source": _source(value.get("source")),
         "created": created,
@@ -300,6 +599,7 @@ def get_note(note_id: str) -> dict | None:
 def create_note(
     title: str = "",
     body: str = "",
+    body_html: str = "",
     category_id: str = "",
     source=None,
 ) -> dict:
@@ -308,12 +608,16 @@ def create_note(
         if len(data["notes"]) >= MAX_NOTES:
             raise ValueError(f"笔记最多 {MAX_NOTES} 条")
         category = _clean_category(category_id, data["categories"])
+        # 富文本优先：清洗后非空时保存 HTML，并让 body 成为可搜索的纯文本。
+        cleaned_html = sanitize_html(body_html)
+        clean_body = html_to_text(cleaned_html) if cleaned_html else _clean_body(body)
         now = time.time()
         used = {item["id"] for item in data["notes"]}
         note = {
             "id": _new_id("n", used),
             "title": _clean_title(title),
-            "body": _clean_body(body),
+            "body": clean_body,
+            "body_html": cleaned_html,
             "category_id": category,
             "source": _source(source),
             "created": now,
@@ -325,7 +629,7 @@ def create_note(
 
 
 def update_note(note_id: str, **fields) -> dict:
-    """只允许修改 title / body / category_id / source，其它字段忽略。"""
+    """只允许修改 title / body / body_html / category_id / source。"""
     with _LOCK:
         data = _read()
         note = next((item for item in data["notes"] if item["id"] == note_id), None)
@@ -340,6 +644,17 @@ def update_note(note_id: str, **fields) -> dict:
             body = _text(fields["body"], MAX_BODY)
             if body is not None:
                 note["body"] = body
+        if "body_html" in fields:
+            raw_html = _text(fields["body_html"], MAX_HTML)
+            if raw_html is not None:
+                cleaned_html = sanitize_html(raw_html)
+                note["body_html"] = cleaned_html
+                if cleaned_html:
+                    # 富文本优先，body 始终是它的纯文本派生。
+                    note["body"] = html_to_text(cleaned_html)
+                elif "body" not in fields:
+                    # 显式清空 body_html 时，没同时给 body 就一起清空。
+                    note["body"] = ""
         if "category_id" in fields:
             note["category_id"] = _clean_category(
                 fields["category_id"], data["categories"]

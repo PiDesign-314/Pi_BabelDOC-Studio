@@ -183,6 +183,35 @@
           </svg>
           新建分类
         </button>
+
+        <button class="btn btn-secondary" id="notes-export" type="button" disabled
+                title="导出当前筛选的笔记为 Markdown">
+          <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor"
+               stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M7 1.9v7.4M4.2 6.6 7 9.4l2.8-2.8"/>
+            <path d="M2.2 10.2v1.3h9.6v-1.3"/>
+          </svg>
+          导出 Markdown
+        </button>
+      </div>
+
+      <div class="notes-stale" id="notes-stale" role="alert" hidden>
+        <div class="notes-stale-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3.6 21 20H3z"/>
+            <path d="M12 9.4v4.6M12 17.2v.2"/>
+          </svg>
+        </div>
+        <div class="notes-stale-body">
+          <h3 class="notes-stale-title" id="notes-stale-title">后端版本较旧，笔记接口尚未生效</h3>
+          <p class="notes-stale-text" id="notes-stale-text">重启应用后即可正常使用。</p>
+          <p class="notes-stale-status" id="notes-stale-status" role="status" aria-live="polite" hidden></p>
+          <div class="notes-stale-actions">
+            <button class="btn btn-primary notes-restart" id="notes-restart" type="button">重启应用</button>
+            <button class="btn btn-secondary" id="notes-reload" type="button">重新加载页面</button>
+          </div>
+        </div>
       </div>
 
       <div class="notes-groups" id="notes-groups" aria-live="polite"></div>

@@ -17,7 +17,7 @@
 
 <div class="r-banner" id="server-banner" hidden>
   <span class="r-banner-dot" aria-hidden="true"></span>
-  <span>应用后端还是旧版本，新批注无法写入磁盘。</span>
+  <span>应用后端还是旧版本，笔记 / 新批注可能无法保存。</span>
   <button type="button" id="banner-restart">重启应用</button>
   <button type="button" class="r-banner-x" id="banner-close" aria-label="关闭">✕</button>
 </div>
@@ -73,7 +73,7 @@
       AI 助读
     </button>
 
-    <button class="r-btn wide" id="btn-notes" type="button" aria-pressed="false" title="笔记：Markdown 记录，可停靠或悬浮">
+    <button class="r-btn wide" id="btn-notes" type="button" aria-pressed="false" title="笔记：悬浮窗口，富文本记录">
       <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor"
            stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
         <path d="M5 2.8h8.2a1.6 1.6 0 0 1 1.6 1.6v11.2a1.6 1.6 0 0 1-1.6 1.6H5a1.6 1.6 0 0 1-1.6-1.6V4.4A1.6 1.6 0 0 1 5 2.8Z"/>
@@ -202,8 +202,9 @@
     <div class="r-ai-settings" id="ai-settings" hidden></div>
   </aside>
 
-  <aside class="r-notes" id="notes-drawer" hidden aria-label="笔记"></aside>
 </div>
+
+<aside class="r-notes" id="notes-drawer" hidden aria-label="笔记"></aside>
 
 <div class="r-sel" id="sel-toolbar" hidden>
   <div class="r-sel-colors">
@@ -219,6 +220,7 @@
   <span class="r-vsep"></span>
   <div class="r-sel-style" id="sel-styles" role="group" aria-label="标记样式"></div>
   <span class="r-vsep"></span>
+  <button class="r-sel-action" id="sel-ai" type="button">AI 提问</button>
   <button class="r-sel-action" id="sel-notebook" type="button">存笔记</button>
   <button class="r-sel-action" id="sel-note" type="button">写批注</button>
   <button class="r-sel-action" id="sel-copy" type="button">复制</button>

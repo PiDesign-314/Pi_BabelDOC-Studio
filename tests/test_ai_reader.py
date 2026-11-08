@@ -113,7 +113,7 @@ def test_build_prompt_contains_materials_and_rules():
     assert "[pN]" in prompt
     assert "先用自己的知识" in prompt
     assert "论文没有直接展开" in prompt
-    assert "600 字" in prompt
+    assert "400–900 字" in prompt
     assert "这个结论有实验支撑吗？" in prompt
     assert "选中的原文" in prompt
     assert "上一轮问题" in prompt

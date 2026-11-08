@@ -305,7 +305,7 @@
         refreshStatus(true);
         return;
       }
-      const cite = target.closest(".r-ai-cite, .r-ai-cites-item");
+      const cite = target.closest(".r-ai-cite, .r-ai-cites-item, .r-ai-msg-quote-tag");
       if (cite) {
         const page = Number(cite.dataset.page);
         const ref = cite.dataset.ref || "";
@@ -486,6 +486,7 @@
     const lines = String(raw == null ? "" : raw).replace(/\r\n?/g, "\n").split("\n");
     const html = [];
     const blank = (line) => !line.trim();
+    const heading = (line) => /^#{1,6}\s+/.test(line.trim());
     const bullet = (line) => /^[-*•]\s+/.test(line.trim());
     const ordered = (line) => /^\d+[.)]\s+/.test(line.trim());
     const quoted = (line) => /^>\s?/.test(line.trim());
@@ -493,6 +494,13 @@
     while (index < lines.length) {
       const line = lines[index];
       if (blank(line)) {
+        index += 1;
+        continue;
+      }
+      if (heading(line)) {
+        const match = /^(#{1,6})\s+(.+)$/.exec(line.trim());
+        const level = Math.min(3, match[1].length);
+        html.push(`<h${level}>${inline(match[2])}</h${level}>`);
         index += 1;
         continue;
       }
@@ -527,6 +535,7 @@
       while (
         index < lines.length &&
         !blank(lines[index]) &&
+        !heading(lines[index]) &&
         !quoted(lines[index]) &&
         !bullet(lines[index]) &&
         !ordered(lines[index])
@@ -559,7 +568,7 @@
     node.className = "r-ai-empty";
     node.innerHTML =
       '<p class="r-ai-empty-title">对着原文提问，答案带出处</p>' +
-      '<p>在正文里选中文字 → 右键 →「引用提问…」。回答里的 <b>p.N</b> 可以点回原文，末尾还有「依据」列表。</p>';
+      '<p>在正文里选中文字，点浮出的「AI 提问」或右键「引用提问…」。回答里的 <b>p.N</b> 可以点回原文，末尾还有「依据」列表。</p>';
     return node;
   }
 
@@ -586,12 +595,34 @@
 
   function messageNode(message) {
     if (message.role === "user") {
-      const node = document.createElement("div");
-      node.className = "r-ai-msg user";
-      node.textContent = String(message.content || "");
-      return node;
+      return userMessageNode(message.content, message.quote);
     }
     return assistantNode(message);
+  }
+
+  function userMessageNode(text, quote) {
+    const node = document.createElement("div");
+    node.className = "r-ai-msg user";
+    if (quote && (quote.text || quote.page)) {
+      const card = document.createElement("div");
+      card.className = "r-ai-msg-quote";
+      const tag = document.createElement("button");
+      tag.type = "button";
+      tag.className = "r-ai-msg-quote-tag";
+      tag.dataset.page = String(Number(quote.page) || 0);
+      tag.textContent = Number(quote.page) ? `第 ${quote.page} 页` : "原文引用";
+      const body = document.createElement("span");
+      body.className = "r-ai-msg-quote-text";
+      body.textContent = truncate(String(quote.text || ""), 180);
+      body.title = truncate(String(quote.text || ""), 1200);
+      card.append(tag, body);
+      node.append(card);
+    }
+    const content = document.createElement("div");
+    content.className = "r-ai-msg-text";
+    content.textContent = String(text || "");
+    node.append(content);
+    return node;
   }
 
   function providerLabel(id) {
@@ -704,12 +735,10 @@
     return list;
   }
 
-  function appendUser(text) {
+  function appendUser(text, quote) {
     if (!els.messages) return null;
     removeEmptyState();
-    const node = document.createElement("div");
-    node.className = "r-ai-msg user";
-    node.textContent = String(text || "");
+    const node = userMessageNode(text, quote);
     els.messages.append(node);
     scrollBottom();
     return node;
@@ -814,10 +843,18 @@
   }
 
   function historyForRequest(prior) {
-    return prior.slice(-6).map((message) => ({
-      role: message.role === "assistant" ? "assistant" : "user",
-      content: String(message.content || "").slice(0, 4000),
-    }));
+    return prior.slice(-6).map((message) => {
+      let content = String(message.content || "");
+      const quote = message.quote;
+      if (message.role === "user" && quote && (quote.text || quote.page)) {
+        const tag = Number(quote.page) ? `[引用 p.${quote.page}]` : "[引用原文]";
+        content = `${tag} ${String(quote.text || "").slice(0, 300)}\n${content}`;
+      }
+      return {
+        role: message.role === "assistant" ? "assistant" : "user",
+        content: content.slice(0, 4000),
+      };
+    });
   }
 
   async function request(url, body, timeoutMs) {
@@ -881,7 +918,7 @@
     const fromComposer = question == null;
 
     if (!options.silent) {
-      appendUser(text);
+      appendUser(text, quotePayload);
     }
     if (fromComposer && !options.silent) els.input.value = "";
     renderSuggest(true);
@@ -922,7 +959,14 @@
       ts: Date.now(),
     };
     if (!options.silent) {
-      state.messages.push({ role: "user", content: text, ts: Date.now() });
+      const entry = { role: "user", content: text, ts: Date.now() };
+      if (quotePayload && (quotePayload.text || quotePayload.page)) {
+        entry.quote = {
+          text: String(quotePayload.text || "").slice(0, 1200),
+          page: Number(quotePayload.page) || 0,
+        };
+      }
+      state.messages.push(entry);
     }
     state.messages.push(assistant);
     trimHistory();
@@ -965,6 +1009,13 @@
         ? parsed.filter(isEntry).slice(-HISTORY_LIMIT).map((message) => ({
             ...message,
             citations: message.role === "assistant" ? normalizeCitations(message.citations) : undefined,
+            quote:
+              message.role === "user" && message.quote && (message.quote.text || message.quote.page)
+                ? {
+                    text: String(message.quote.text || "").slice(0, 1200),
+                    page: Number(message.quote.page) || 0,
+                  }
+                : undefined,
           }))
         : [];
     } catch {

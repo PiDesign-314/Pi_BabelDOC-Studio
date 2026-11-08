@@ -10,7 +10,7 @@
 (() => {
   "use strict";
 
-  const { $, api, toast, formatTime, fileName } = window.Studio;
+  const { $, toast, formatTime, fileName } = window.Studio;
 
   const el = {
     switch: $("#view-switch"),
@@ -22,19 +22,28 @@
     count: $("#notes-count"),
     search: $("#notes-search"),
     newCat: $("#notes-new-cat"),
+    export: $("#notes-export"),
     groups: $("#notes-groups"),
     empty: $("#notes-empty"),
     emptyTitle: $("#notes-empty-title"),
     emptyText: $("#notes-empty-text"),
     retry: $("#notes-retry"),
     loading: $("#notes-loading"),
+    stale: $("#notes-stale"),
+    staleTitle: $("#notes-stale-title"),
+    staleText: $("#notes-stale-text"),
+    staleStatus: $("#notes-stale-status"),
+    restart: $("#notes-restart"),
+    reload: $("#notes-reload"),
   };
 
   /* The page is still rendered by older builds without the notes markup. */
-  if (!el.switch || !el.view || !el.groups) return;
+  if (!el.switch || !el.view || !el.groups || !el.stale || !el.export) return;
 
   const BODY_PREVIEW = 120;
   const QUOTE_PREVIEW = 72;
+  const RESTART_POLL_MS = 700;
+  const RESTART_TRIES = 40;
 
   const state = {
     view: "results",
@@ -42,6 +51,12 @@
     loading: false,
     snapshot: false,
     error: "",
+    stale: false,
+    staleReason: "",
+    healthDetail: "",
+    restarting: false,
+    restartProgress: "",
+    restartError: "",
     query: "",
     category: "all", // "all" | "uncategorized" | category id
     notes: [],
@@ -70,6 +85,50 @@
   };
 
   /* ------------------------------------------------------- helpers -- */
+  /* Local wrapper around shared.js' api(): the notes view needs the HTTP
+     status to tell a stale backend (404) from an ordinary error. */
+  async function request(path, options = {}) {
+    const opts = { ...options };
+    if (opts.body && !(opts.body instanceof FormData)) {
+      opts.headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+      opts.body = JSON.stringify(opts.body);
+    }
+    const response = await fetch(path, opts);
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+    if (!response.ok) {
+      const error = new Error((data && data.error) || `请求失败（${response.status}）`);
+      error.status = response.status;
+      error.data = data;
+      throw error;
+    }
+    return data;
+  }
+
+  async function probeHealth() {
+    try {
+      const response = await fetch("/api/health", { cache: "no-store" });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
+
+  function healthBuild(health) {
+    if (!health || typeof health !== "object") return "";
+    const value = health.build != null ? health.build : health.version;
+    return value == null ? "" : String(value);
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   function sourceOf(note) {
     const raw = note && typeof note.source === "object" && note.source ? note.source : {};
     const page = Number(raw.page);
@@ -93,9 +152,21 @@
     return title || "无标题笔记";
   }
 
-  /* Strip the most common Markdown markers so the preview reads like prose. */
+  /* Remove HTML markup so imported notes can never inject markup into the
+     preview or the exported Markdown. */
+  function stripHtml(value) {
+    return String(value == null ? "" : value)
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<\/?[a-zA-Z][^>]*>/g, "");
+  }
+
+  /* Strip HTML and the most common Markdown markers so the preview reads like
+     plain prose. Only ever inserted through textContent. */
   function stripMarkdown(value) {
-    let text = String(value == null ? "" : value);
+    let text = stripHtml(value);
+    text = text.replace(/&lt;\/?[a-zA-Z][^&]*?&gt;/g, " ");
+    text = text.replace(/<br\s*\/?>/gi, " ");
     text = text.replace(/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/gm, " ");
     text = text.replace(/```[\s\S]*?```/g, " ").replace(/~~~[\s\S]*?~~~/g, " ");
     text = text.replace(/`([^`]*)`/g, "$1");
@@ -106,7 +177,13 @@
     text = text.replace(/^\s{0,3}([-*+]|\d+\s*[.)])\s+/gm, "");
     text = text.replace(/[*_~]{1,3}/g, "");
     text = text.replace(/\|/g, " ");
-    text = text.replace(/<[^>]+>/g, " ");
+    text = text
+      .replace(/&nbsp;/g, " ")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&");
     return text.replace(/\s+/g, " ").trim();
   }
 
@@ -167,6 +244,118 @@
     if (on) el.empty.hidden = true;
   }
 
+  /* ------------------------------------------- stale backend recovery -- */
+  const STALE_COPY = {
+    notfound: {
+      title: "后端版本较旧，笔记接口尚未生效",
+      text: "正在运行的后端没有 /api/notes 接口。重启应用后即可正常使用笔记视图。",
+    },
+    offline: {
+      title: "无法连接本地服务",
+      text: "读取笔记时连接失败，后端可能正在重启或已经退出。重启应用后再试。",
+    },
+    operation: {
+      title: "后端版本较旧，笔记接口尚未生效",
+      text: "刚才的笔记操作返回 404。重启应用后即可正常使用笔记视图。",
+    },
+  };
+
+  function renderStale() {
+    const copy = STALE_COPY[state.staleReason] || STALE_COPY.notfound;
+    el.stale.hidden = false;
+    el.staleTitle.textContent = copy.title;
+    el.staleText.textContent = copy.text;
+    el.restart.disabled = state.restarting;
+    el.reload.disabled = state.restarting;
+    el.restart.textContent = state.restarting ? "正在重启…" : "重启应用";
+    let status = "";
+    if (state.restartError) status = state.restartError;
+    else if (state.restarting) status = state.restartProgress || "正在重启并等待新版本启动…";
+    else if (state.healthDetail) status = state.healthDetail;
+    el.staleStatus.hidden = !status;
+    el.staleStatus.textContent = status;
+  }
+
+  /* Explain the stale process with /api/health data when it is reachable. */
+  async function describeStaleBackend() {
+    if (!state.stale) return;
+    const health = await probeHealth();
+    if (!state.stale) return;
+    if (!health) {
+      state.healthDetail = "健康检查没有响应，后端可能正在重启或已经退出。";
+    } else {
+      const features = Array.isArray(health.features) ? health.features : [];
+      const version = health.version != null ? String(health.version) : "未知版本";
+      const build = health.build != null ? String(health.build) : "未知";
+      state.healthDetail = features.includes("notes")
+        ? `后端健康检查：v${version}（build ${build}）已声明 notes 能力，但笔记接口仍返回 404。`
+        : `后端健康检查：v${version}（build ${build}），features 中没有 notes。`;
+    }
+    renderStale();
+  }
+
+  function enterStale(reason) {
+    state.stale = true;
+    state.staleReason = reason || "notfound";
+    state.loaded = true;
+    state.notes = [];
+    state.allNotes = [];
+    state.snapshot = false;
+    state.error = "";
+    state.healthDetail = "";
+    state.restartError = "";
+    state.restartProgress = "";
+    render();
+    describeStaleBackend();
+  }
+
+  async function restartApp() {
+    if (state.restarting) return;
+    state.restarting = true;
+    state.restartError = "";
+    state.restartProgress = "正在请求重启…";
+    state.healthDetail = "";
+    renderStale();
+    const before = await probeHealth();
+    renderStale();
+
+    try {
+      await request("/api/app/restart", { method: "POST" });
+    } catch (error) {
+      /* A dropped connection is expected when the old process exits; keep
+         polling. An HTTP error means this backend cannot restart itself. */
+      if (error && error.status) {
+        state.restarting = false;
+        state.restartError = `重启接口不可用（HTTP ${error.status}）。请关闭 BabelDOC Studio 窗口后重新打开。`;
+        renderStale();
+        return;
+      }
+    }
+
+    const beforeBuild = healthBuild(before);
+    const beforeFeatures = before && Array.isArray(before.features) ? before.features : [];
+    const beforeNotes = beforeFeatures.includes("notes");
+    for (let attempt = 1; attempt <= RESTART_TRIES; attempt++) {
+      await wait(RESTART_POLL_MS);
+      state.restartProgress = `正在等待新版本启动…（${attempt}/${RESTART_TRIES}）`;
+      renderStale();
+      const health = await probeHealth();
+      if (!health) continue;
+      const build = healthBuild(health);
+      const features = Array.isArray(health.features) ? health.features : [];
+      const hasNotes = features.includes("notes");
+      const changed = Boolean(build && beforeBuild && build !== beforeBuild);
+      const gainedNotes = hasNotes && !beforeNotes;
+      if (changed || gainedNotes || (hasNotes && (!before || !beforeBuild))) {
+        location.reload();
+        return;
+      }
+    }
+    state.restarting = false;
+    state.restartError = `重启后 ${Math.round((RESTART_POLL_MS * RESTART_TRIES) / 1000)} 秒内没有检测到新的后端版本，请关闭 BabelDOC Studio 窗口后重新打开。`;
+    renderStale();
+  }
+
   /* --------------------------------------------------- data loading -- */
   async function load() {
     const seq = ++state.seq;
@@ -177,7 +366,7 @@
     const full = !state.query && state.category === "all";
     setLoading(true);
     try {
-      const data = await api(`/api/notes${query ? `?${query}` : ""}`);
+      const data = await request(`/api/notes${query ? `?${query}` : ""}`);
       const notes = Array.isArray(data.notes) ? data.notes : [];
       const categories = Array.isArray(data.categories) ? data.categories : [];
       if (seq !== state.seq) {
@@ -199,11 +388,27 @@
       }
       state.loaded = true;
       state.error = "";
+      state.stale = false;
+      state.staleReason = "";
+      state.healthDetail = "";
+      state.restartError = "";
+      state.restartProgress = "";
+      state.restarting = false;
       render();
       /* The user may have started a search before the first full load landed. */
       if (!state.snapshot) ensureSnapshot();
     } catch (error) {
       if (seq !== state.seq) return;
+      const staleKind =
+        error && error.status === 404
+          ? "notfound"
+          : error && !error.status
+            ? "offline"
+            : "";
+      if (staleKind) {
+        enterStale(staleKind);
+        return;
+      }
       state.error = (error && error.message) || "请求失败";
       toast(`读取笔记失败：${state.error}`, "bad");
       if (!state.notes.length) {
@@ -220,7 +425,7 @@
   async function ensureSnapshot() {
     if (state.snapshot) return;
     try {
-      const data = await api("/api/notes");
+      const data = await request("/api/notes");
       state.allNotes = Array.isArray(data.notes) ? data.notes : [];
       if (Array.isArray(data.categories)) state.categories = data.categories;
       state.snapshot = true;
@@ -234,7 +439,7 @@
      the currently filtered list (or reuse the snapshot when no filter is on). */
   async function refreshAfterChange() {
     try {
-      const data = await api("/api/notes");
+      const data = await request("/api/notes");
       state.allNotes = Array.isArray(data.notes) ? data.notes : [];
       state.categories = Array.isArray(data.categories) ? data.categories : [];
       state.snapshot = true;
@@ -246,10 +451,24 @@
         return;
       }
     } catch (error) {
+      if (error && error.status === 404) {
+        enterStale("operation");
+        return;
+      }
       toast(`刷新笔记失败：${(error && error.message) || "请求失败"}`, "bad");
       return;
     }
     await load();
+  }
+
+  /* Mutations share the same recovery path: a 404 means the backend is stale. */
+  function mutationFailed(error, fallback) {
+    if (error && error.status === 404) {
+      enterStale("operation");
+      return true;
+    }
+    toast((error && error.message) || fallback, "bad");
+    return false;
   }
 
   /* ---------------------------------------------------- view switching -- */
@@ -370,6 +589,18 @@
   function renderNotes() {
     el.title.textContent = currentTitle();
     el.count.textContent = String(state.notes.length);
+    el.export.disabled = state.stale || !state.notes.length;
+
+    if (state.stale) {
+      el.groups.replaceChildren();
+      el.empty.hidden = true;
+      el.retry.hidden = true;
+      renderStale();
+      return;
+    }
+    el.stale.hidden = true;
+    el.restart.disabled = false;
+    el.reload.disabled = false;
 
     if (state.error && !state.notes.length) {
       el.groups.replaceChildren();
@@ -562,13 +793,13 @@
     const name = answer.trim();
     if (!name) return;
     try {
-      const data = await api("/api/notes/categories", { method: "POST", body: { name } });
+      const data = await request("/api/notes/categories", { method: "POST", body: { name } });
       if (Array.isArray(data.categories)) state.categories = data.categories;
       renderRail();
       const created = data.category;
       toast(`已创建分类「${created && created.name ? created.name : name}」`, "good");
     } catch (error) {
-      toast((error && error.message) || "新建分类失败", "bad");
+      mutationFailed(error, "新建分类失败");
     }
   }
 
@@ -580,7 +811,7 @@
     const name = answer.trim();
     if (!name || name === category.name) return;
     try {
-      const data = await api(`/api/notes/categories/${encodeURIComponent(category.id)}`, {
+      const data = await request(`/api/notes/categories/${encodeURIComponent(category.id)}`, {
         method: "PATCH",
         body: { name },
       });
@@ -588,7 +819,7 @@
       render();
       toast("已重命名分类", "good");
     } catch (error) {
-      toast((error && error.message) || "重命名分类失败", "bad");
+      mutationFailed(error, "重命名分类失败");
     }
   }
 
@@ -600,7 +831,7 @@
     );
     if (!confirmed) return;
     try {
-      const data = await api(`/api/notes/categories/${encodeURIComponent(category.id)}`, {
+      const data = await request(`/api/notes/categories/${encodeURIComponent(category.id)}`, {
         method: "DELETE",
       });
       state.categories = Array.isArray(data.categories) ? data.categories : [];
@@ -608,7 +839,7 @@
       await refreshAfterChange();
       toast("已删除分类", "good");
     } catch (error) {
-      toast((error && error.message) || "删除分类失败", "bad");
+      mutationFailed(error, "删除分类失败");
     }
   }
 
@@ -617,12 +848,12 @@
     if (!confirmed) return;
     button.disabled = true;
     try {
-      await api(`/api/notes/${encodeURIComponent(note.id)}`, { method: "DELETE" });
+      await request(`/api/notes/${encodeURIComponent(note.id)}`, { method: "DELETE" });
       toast("已删除笔记", "good");
       await refreshAfterChange();
     } catch (error) {
       button.disabled = false;
-      toast((error && error.message) || "删除笔记失败", "bad");
+      mutationFailed(error, "删除笔记失败");
     }
   }
 
@@ -630,7 +861,7 @@
     const value = select.value;
     select.disabled = true;
     try {
-      await api(`/api/notes/${encodeURIComponent(note.id)}`, {
+      await request(`/api/notes/${encodeURIComponent(note.id)}`, {
         method: "PATCH",
         body: { category_id: value === "" ? null : value },
       });
@@ -638,9 +869,71 @@
       await refreshAfterChange();
     } catch (error) {
       select.disabled = false;
-      toast((error && error.message) || "归类失败", "bad");
-      renderNotes(); // put the select back on the stored value
+      if (!mutationFailed(error, "归类失败")) renderNotes();
     }
+  }
+
+  /* ------------------------------------------------------------ export -- */
+  function pad2(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function exportFileName(now = new Date()) {
+    const date = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`;
+    const time = `${pad2(now.getHours())}${pad2(now.getMinutes())}`;
+    return `BabelDOC-notes-${date}-${time}.md`;
+  }
+
+  function oneLine(value) {
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+  }
+
+  function quoteBlock(value) {
+    return String(value)
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map((line) => `> ${line}`.trimEnd())
+      .join("\n");
+  }
+
+  function noteMarkdown(note) {
+    const source = sourceOf(note);
+    const parts = [];
+    if (source.path) parts.push(fileName(source.path));
+    if (source.page) parts.push(`第 ${source.page} 页`);
+    const category = categoryName(note.category_id);
+    if (category && category !== "未分类") parts.push(category);
+
+    const lines = [`# ${oneLine(stripHtml(noteTitle(note)))}`];
+    if (parts.length) lines.push("", `> 来源：${oneLine(stripHtml(parts.join(" · ")))}`);
+    if (source.quote) lines.push("", quoteBlock(stripHtml(source.quote).trim()));
+    const body = stripHtml(note.body).replace(/\r\n?/g, "\n").trim();
+    if (body) lines.push("", body);
+    return lines.join("\n");
+  }
+
+  function notesToMarkdown(notes) {
+    return `${notes.map(noteMarkdown).join("\n\n---\n\n")}\n`;
+  }
+
+  function downloadMarkdown(name, text) {
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.style.display = "none";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  /* Exports exactly the notes currently listed (filter + search applied). */
+  function exportNotes() {
+    if (!state.notes.length) return;
+    downloadMarkdown(exportFileName(), notesToMarkdown(state.notes));
+    toast(`已导出 ${state.notes.length} 条笔记`, "good");
   }
 
   /* ---------------------------------------------------------- events -- */
@@ -660,9 +953,14 @@
   });
 
   el.newCat.addEventListener("click", createCategory);
+  el.export.addEventListener("click", exportNotes);
+  el.restart.addEventListener("click", restartApp);
+  el.reload.addEventListener("click", () => location.reload());
   el.retry.addEventListener("click", () => {
     state.loaded = false;
     state.error = "";
+    state.stale = false;
+    state.staleReason = "";
     load();
   });
 

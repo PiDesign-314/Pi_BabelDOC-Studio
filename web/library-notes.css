@@ -251,6 +251,79 @@ body.lib-view-notes .lib-wrap > .lib-main { display: none; }
   background-position: right 8px center;
 }
 
+/* ===================================================== stale backend -- */
+.notes-stale {
+  display: flex;
+  gap: 14px;
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: var(--radius-group);
+  background: color-mix(in srgb, var(--accent-soft) 60%, var(--card));
+  box-shadow: var(--shadow-card);
+}
+.notes-stale[hidden] { display: none; }
+
+.notes-stale-icon {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.notes-stale-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.notes-stale-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.1px;
+  color: var(--text);
+}
+
+.notes-stale-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.notes-stale-status {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.notes-stale-status[hidden] { display: none; }
+
+.notes-stale-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.notes-stale-actions .btn-primary {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--radius-control);
+  font-size: 14px;
+}
+.notes-stale .btn:disabled { opacity: 0.55; cursor: default; }
+
+#notes-export:disabled { opacity: 0.5; }
+
 /* ========================================================== empty/load -- */
 .notes-empty { padding-top: 48px; }
 
@@ -294,6 +367,9 @@ body.lib-view-notes .lib-wrap > .lib-main { display: none; }
   .notes-group-head { flex-wrap: wrap; }
   .notes-group-link { margin-left: 0; }
   .notes-empty { padding-top: 36px; }
+  .notes-stale { gap: 10px; padding: 14px; }
+  .notes-stale-icon { width: 32px; height: 32px; border-radius: 10px; }
+  .notes-stale-actions .btn { flex: 1 1 auto; }
 }
 
 @keyframes note-in {

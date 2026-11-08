@@ -446,3 +446,242 @@ def test_api_category_lifecycle(store):
     again = client.delete(f"/api/notes/categories/{category['id']}")
     assert again.status_code == 404
     assert again.get_json() == {"error": "分类不存在"}
+
+
+# --------------------------------------------------------------------------- #
+# 富文本 body_html
+# --------------------------------------------------------------------------- #
+def test_sanitize_html_strips_dangerous_content():
+    html = (
+        '<p onclick="steal()">Hello</p>'
+        '<script>alert("xss")</script>'
+        '<img src="x" onerror="alert(1)">'
+        '<a href="javascript:alert(1)">坏链接</a>'
+        '<a href="https://example.com" title="安全">好链接</a>'
+        '<iframe src="https://evil.example"></iframe>'
+        "<style>p{color:red}</style>"
+        '<object data="x">对象</object>'
+        '<svg><circle onload="x"/></svg>'
+        "<math><mi>x</mi></math>"
+        "<template><p>模板</p></template>"
+        '<embed src="x">'
+    )
+    clean = notes.sanitize_html(html)
+
+    assert "script" not in clean.lower()
+    assert "alert" not in clean  # 脚本内容与 javascript: 链接都不剩
+    assert "onerror" not in clean and "onclick" not in clean
+    for tag in ("iframe", "style", "object", "svg", "math", "template", "embed"):
+        assert f"<{tag}" not in clean.lower()
+    assert "<p>Hello</p>" in clean
+    assert "<a>坏链接</a>" in clean
+    assert (
+        '<a href="https://example.com" title="安全">好链接</a>' in clean
+    )
+
+
+def test_sanitize_html_keeps_formatting_and_styles():
+    html = (
+        "<h1>标题</h1>"
+        "<p><strong>粗体</strong><em>斜体</em><u>下划线</u></p>"
+        "<ul><li>一</li><li>二</li></ul>"
+        "<blockquote>引用</blockquote>"
+        '<span style="color: red; background-color: yellow; '
+        'font-size: 30px; text-align: center">样式</span>'
+        '<a href="mailto:a@b.com" style="color: blue" title="邮件">联系</a>'
+        '<hr style="text-align: center">'
+    )
+    clean = notes.sanitize_html(html)
+
+    for fragment in (
+        "<h1>标题</h1>",
+        "<strong>粗体</strong>",
+        "<em>斜体</em>",
+        "<ul><li>一</li><li>二</li></ul>",
+        "<blockquote>引用</blockquote>",
+    ):
+        assert fragment in clean
+    assert (
+        'style="color: red; background-color: yellow; text-align: center"' in clean
+    )
+    assert "font-size" not in clean
+    assert (
+        '<a href="mailto:a@b.com" style="color: blue" title="邮件">联系</a>' in clean
+    )
+    assert '<hr style="text-align: center">' in clean
+
+
+def test_sanitize_html_escapes_and_balances():
+    clean = notes.sanitize_html("<p>a &lt; b &amp; c &gt; d</p><p><strong>未闭合")
+    assert "a &lt; b &amp; c &gt; d" in clean
+    assert clean.endswith("</strong></p>")  # 自动补齐结束标签
+
+    attr = notes.sanitize_html('<a title=\'a"b&c\'>x</a>')
+    assert 'title="a&quot;b&amp;c"' in attr
+
+    assert notes.sanitize_html(None) == ""
+    assert notes.sanitize_html("<span/>") == "<span></span>"
+    assert notes.sanitize_html("<br/>") == "<br>"
+    assert notes.sanitize_html("<p>a</div></p>") == "<p>a</p>"
+
+
+def test_sanitize_html_length_limit():
+    huge = "<p>" + "x" * (notes.MAX_HTML + 1000) + "</p>"
+    clean = notes.sanitize_html(huge)
+    assert len(clean) <= notes.MAX_HTML
+    assert clean.startswith("<p>") and clean.endswith("</p>")
+
+    # 转义会变长，截断不能留下半个实体。
+    entity = notes.sanitize_html("<p>" + "&" * notes.MAX_HTML + "</p>")
+    assert len(entity) <= notes.MAX_HTML
+    assert entity.endswith("</p>")
+    text_part = entity[3:-4]
+    assert text_part.endswith(";")  # 最后一个 &amp; 是完整的
+
+
+def test_html_to_text_extracts_searchable_plain_text():
+    html = (
+        "<h1>标题</h1><p>第一段&nbsp;<strong>重点</strong></p>"
+        "<ul><li>甲</li><li>乙</li></ul><blockquote>引用</blockquote>"
+        "<script>不该出现</script>"
+    )
+    text = notes.html_to_text(html)
+    assert text == "标题\n第一段 重点\n· 甲\n· 乙\n引用"
+    assert notes.html_to_text("<p>a &amp; b &lt; c</p>") == "a & b < c"
+    assert notes.html_to_text("<p>  a\n\tb  </p>") == "a b"
+    assert notes.html_to_text("") == ""
+
+    long_text = notes.html_to_text("<p>" + "x" * (notes.MAX_BODY + 10) + "</p>")
+    assert len(long_text) <= notes.MAX_BODY
+
+
+def test_body_is_derived_from_body_html(store):
+    html = (
+        "<h1>报告</h1><p>结论 <strong>有效</strong></p>"
+        "<ul><li>证据一</li><li>证据二</li></ul>"
+    )
+    note = notes.create_note(title="富文本", body="旧正文", body_html=html)
+
+    assert note["body_html"] == notes.sanitize_html(html)
+    assert note["body"] == "报告\n结论 有效\n· 证据一\n· 证据二"
+    assert note["body"] != "旧正文"
+    # 搜索走派生出来的 body。
+    assert [item["id"] for item in notes.list_notes(query="证据二")["notes"]] == [
+        note["id"]
+    ]
+
+    # 危险内容在保存前就被清掉，body 也不含脚本。
+    unsafe = notes.create_note(body_html="<p>安全</p><script>alert(1)</script>")
+    assert unsafe["body_html"] == "<p>安全</p>"
+    assert unsafe["body"] == "安全"
+
+    # 空 body_html 时沿用 body（旧行为）。
+    plain = notes.create_note(body="普通正文", body_html="")
+    assert plain["body_html"] == "" and plain["body"] == "普通正文"
+
+
+def test_update_note_body_html_semantics(store):
+    note = notes.create_note(body="原始正文")
+    assert note["body_html"] == ""
+
+    # 只传 body：保持旧行为，body_html 不变。
+    note = notes.update_note(note["id"], body="新正文")
+    assert note["body"] == "新正文" and note["body_html"] == ""
+
+    # 非空 body_html：保存清洗后的 HTML 并同步 body。
+    note = notes.update_note(note["id"], body_html="<p>富文本</p>")
+    assert note["body_html"] == "<p>富文本</p>"
+    assert note["body"] == "富文本"
+
+    # 同时传 body 和 body_html：body_html 优先，body 由它派生。
+    note = notes.update_note(
+        note["id"], body="被忽略", body_html="<p><strong>再次</strong></p>"
+    )
+    assert note["body_html"] == "<p><strong>再次</strong></p>"
+    assert note["body"] == "再次"
+
+    # 显式空字符串：清空 body_html，且未传 body 时 body 也清空。
+    note = notes.update_note(note["id"], body_html="")
+    assert note["body_html"] == "" and note["body"] == ""
+
+    # 显式空 body_html 同时传 body：保留新 body。
+    note = notes.update_note(note["id"], body="保留正文", body_html="")
+    assert note["body_html"] == "" and note["body"] == "保留正文"
+
+    # 危险 HTML 清洗为空等价于清空。
+    note = notes.update_note(note["id"], body_html="<script>alert(1)</script>")
+    assert note["body_html"] == "" and note["body"] == ""
+
+
+def test_old_note_without_body_html_still_loads(store):
+    _seed(
+        store,
+        [
+            {
+                "id": "n_old",
+                "title": "旧笔记",
+                "body": "# Markdown 正文\n\n旧内容",
+                "category_id": "",
+                "source": {
+                    "path": r"C:\old.pdf",
+                    "doc_id": "",
+                    "page": 1,
+                    "quote": "",
+                    "location": "",
+                },
+                "created": 1.0,
+                "updated": 2.0,
+            }
+        ],
+    )
+    item = notes.get_note("n_old")
+    assert item is not None
+    assert item["body"] == "# Markdown 正文\n\n旧内容"
+    assert item["body_html"] == ""  # 旧数据自动补空字段
+    assert [entry["id"] for entry in notes.list_notes(query="markdown")["notes"]] == [
+        "n_old"
+    ]
+    # 保存（例如改标题）后仍兼容旧数据。
+    item = notes.update_note("n_old", title="改名")
+    assert item["body_html"] == ""
+    assert item["body"].startswith("# Markdown")
+
+
+def test_api_body_html_roundtrip(store):
+    import app as studio
+
+    client = studio.app.test_client()
+
+    created = client.post(
+        "/api/notes",
+        json={
+            "title": "富文本笔记",
+            "body": "旧的纯文本",
+            "body_html": '<h1>标题</h1><p onclick="x">正文</p><script>x</script>',
+        },
+    )
+    assert created.status_code == 200
+    note = created.get_json()["note"]
+    assert note["body_html"] == "<h1>标题</h1><p>正文</p>"
+    assert note["body"] == "标题\n正文"
+
+    listed = client.get("/api/notes").get_json()["notes"]
+    assert listed[0]["body_html"] == note["body_html"]
+    assert listed[0]["body"] == "标题\n正文"
+
+    patched = client.patch(
+        f"/api/notes/{note['id']}",
+        json={"body_html": "<p><strong>新</strong>内容</p>"},
+    )
+    assert patched.status_code == 200
+    patched_note = patched.get_json()["note"]
+    assert patched_note["body_html"] == "<p><strong>新</strong>内容</p>"
+    assert patched_note["body"] == "新内容"
+
+    cleared = client.patch(f"/api/notes/{note['id']}", json={"body_html": ""})
+    assert cleared.status_code == 200
+    cleared_note = cleared.get_json()["note"]
+    assert cleared_note["body_html"] == "" and cleared_note["body"] == ""
+
+    plain = client.post("/api/notes", json={"body": "纯文本"}).get_json()["note"]
+    assert plain["body_html"] == "" and plain["body"] == "纯文本"

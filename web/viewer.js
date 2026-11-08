@@ -106,6 +106,7 @@
     error: $("#error"),
     selToolbar: $("#sel-toolbar"),
     selNote: $("#sel-note"),
+    selAi: $("#sel-ai"),
     selNotebook: $("#sel-notebook"),
     selCopy: $("#sel-copy"),
     editor: $("#editor"),
@@ -2582,6 +2583,21 @@
       const item = highlightSelection("pink");
       if (item) openEditor(item.id, event);
     });
+    el.selAi.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const captured = state.pending || captureSelection();
+      if (!captured || !String(captured.text || "").trim()) {
+        toast("先选中一段原文", "bad");
+        return;
+      }
+      if (window.ReaderAI && typeof window.ReaderAI.quote === "function") {
+        window.ReaderAI.quote(captured);
+      } else {
+        toast("AI 脚本没有加载，请刷新重试", "bad");
+      }
+      window.getSelection().removeAllRanges();
+      hideSelectionToolbar();
+    });
     el.selNotebook.addEventListener("click", (event) => {
       event.stopPropagation();
       const captured = state.pending || captureSelection();
@@ -2665,6 +2681,9 @@
         }
         return;
       }
+      const typing =
+        ["input", "textarea", "select"].includes(tag) || event.target.isContentEditable;
+      if (typing) return;
       if ((event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "S")) {
         event.preventDefault();
         savePdf();
@@ -3443,6 +3462,7 @@
   }
 
   /* ------------------------------------------------------ stale server -- */
+  let serverBuild = 0;
   function showStaleBanner() {
     state.serverStale = true;
     if (!el.banner) return;
@@ -3451,13 +3471,18 @@
   }
   function pollRestart() {
     let tries = 0;
+    const baseline = serverBuild;
     const tick = async () => {
       tries += 1;
       try {
         const health = await api("/api/health");
-        if (health && health.version === "1.4.0") {
-          window.location.reload();
-          return;
+        if (health && health.ok) {
+          /* The restarted process recomputes BUILD_ID from the source on disk,
+             so a different build means the new code is really serving. */
+          if (!baseline || Number(health.build) !== baseline || tries >= 3) {
+            window.location.reload();
+            return;
+          }
         }
       } catch {
         /* the server is still down while it restarts */
@@ -4422,8 +4447,9 @@
     }
     api("/api/health")
       .then((health) => {
+        serverBuild = Number(health.build) || 0;
         const features = Array.isArray(health.features) ? health.features : [];
-        if (!features.includes("ink") || !features.includes("text")) showStaleBanner();
+        if (!features.includes("ink") || !features.includes("notes")) showStaleBanner();
       })
       .catch(() => {});
 
