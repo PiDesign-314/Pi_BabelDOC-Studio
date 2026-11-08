@@ -48,6 +48,13 @@ DEFAULTS: dict = {
     "ocr_workaround": False,
     "term_model": "",
     "term_model_enabled": False,
+    "ai": {
+        "provider": "auto",
+        "model": "",
+        "base_url": "",
+        "preset": "moonshot",
+        "api_key_enc": "",
+    },
 }
 
 
@@ -123,6 +130,10 @@ def _merge(defaults: dict, loaded: dict) -> dict:
     for key, value in loaded.items():
         if key == "providers" and isinstance(value, dict):
             merged["providers"] = {**value}
+        elif key == "ai" and isinstance(value, dict):
+            # New AI fields must appear even when an old settings file only
+            # knows some of them.
+            merged["ai"] = {**(defaults.get("ai") or {}), **value}
         else:
             merged[key] = value
     return merged
@@ -159,6 +170,13 @@ def public_settings() -> dict:
             "remember": bool(data.get("remember", False)),
         }
     settings["providers"] = providers
+    original_ai = settings.get("ai") or {}
+    if isinstance(original_ai, dict):
+        public_ai = {
+            key: value for key, value in original_ai.items() if key != "api_key_enc"
+        }
+        public_ai["api_key_set"] = bool(original_ai.get("api_key_enc"))
+        settings["ai"] = public_ai
     settings.pop("_raw", None)
     return settings
 
@@ -180,13 +198,38 @@ def save_public(payload: dict) -> dict:
             # keep the plain key in memory only via the response below
             "_plain": api_key,
         }
-    stored = {k: v for k, v in payload.items() if k != "providers"}
+    stored = {}
+    for key, value in payload.items():
+        if key == "providers":
+            continue
+        if key == "ai" and isinstance(value, dict):
+            ai = dict(settings.get("ai") or {})
+            for field in ("provider", "model", "base_url", "preset"):
+                if field in value and value[field] is not None:
+                    ai[field] = str(value[field]).strip()
+            if "api_key_enc" in value:
+                ai["api_key_enc"] = str(value.get("api_key_enc") or "")
+            raw_key = value.get("api_key", "")
+            if "api_key" in value and raw_key is None:
+                ai["api_key_enc"] = ""
+            elif isinstance(raw_key, str) and raw_key.strip():
+                ai["api_key_enc"] = protect(raw_key.strip())
+            ai.pop("api_key", None)
+            stored[key] = ai
+        else:
+            stored[key] = value
     stored["providers"] = {
         pid: {k: v for k, v in data.items() if k != "_plain"}
         for pid, data in providers.items()
     }
     for key, value in DEFAULTS.items():
-        stored.setdefault(key, value)
+        if key == "ai":
+            stored["ai"] = {
+                **DEFAULTS["ai"],
+                **(stored.get("ai") or settings.get("ai") or {}),
+            }
+        else:
+            stored.setdefault(key, value)
     save_raw(stored)
 
     result = dict(stored)
@@ -199,7 +242,62 @@ def save_public(payload: dict) -> dict:
         }
         for pid, data in providers.items()
     }
+    if isinstance(result.get("ai"), dict):
+        result["ai"] = {
+            key: value for key, value in result["ai"].items() if key != "api_key_enc"
+        }
+        result["ai"]["api_key_set"] = bool(stored["ai"].get("api_key_enc"))
     return result
+
+
+# --------------------------------------------------------------------------- #
+# AI reader settings
+# --------------------------------------------------------------------------- #
+_AI_FIELDS = ("provider", "model", "base_url", "preset")
+
+
+def public_ai_settings() -> dict:
+    """AI settings safe for the UI: never returns the plain API key."""
+    ai = load_raw().get("ai") or {}
+    return {
+        "provider": str(ai.get("provider") or "auto"),
+        "model": str(ai.get("model") or ""),
+        "base_url": str(ai.get("base_url") or ""),
+        "preset": str(ai.get("preset") or "moonshot"),
+        "api_key_set": bool(ai.get("api_key_enc")),
+    }
+
+
+def ai_api_key() -> str:
+    """Decrypted API key for the AI reader (empty when none is saved)."""
+    ai = load_raw().get("ai") or {}
+    return unprotect(str(ai.get("api_key_enc") or ""))
+
+
+def save_ai_settings(payload: dict) -> dict:
+    """Persist ``settings["ai"]`` from the AI panel.
+
+    ``api_key`` semantics: a non-empty string replaces the saved key, an empty
+    string keeps it, and ``null`` clears it.  The GET/POST response only says
+    whether a key is stored.
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    settings = load_raw()
+    ai = dict(settings.get("ai") or {})
+    for field in _AI_FIELDS:
+        if field in payload and payload[field] is not None:
+            ai[field] = str(payload[field]).strip()
+    if "api_key" in payload:
+        raw_key = payload.get("api_key")
+        if raw_key is None:
+            ai["api_key_enc"] = ""
+        elif isinstance(raw_key, str) and raw_key.strip():
+            ai["api_key_enc"] = protect(raw_key.strip())
+        # empty string -> "do not change the saved key"
+    ai.pop("api_key", None)
+    settings["ai"] = {**DEFAULTS["ai"], **ai}
+    save_raw(settings)
+    return public_ai_settings()
 
 
 def ensure_dirs() -> None:

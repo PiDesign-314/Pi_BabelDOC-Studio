@@ -27,6 +27,8 @@ BabelDOC Studio 是一个面向 **PDF 论文 / 技术文档** 的本地翻译工
 - **本地优先**：Flask 本地服务 + Edge 应用窗口；PDF、批注和 API Key 都留在本机，Key 使用 Windows DPAPI 加密。
 - **任意 OpenAI 兼容模型**：DeepSeek、智谱 GLM、Google Gemini、OpenRouter、Ollama、自定义网关；另有内置 Google 免费翻译。
 - **完整的阅读与批注**：左右双语、八色高亮、手绘样式、便签、页面文字、页边距批注、术语库与结果库。
+- **AI 助读**：选中原文右键引用提问，回答带 `p.N` 出处，点一下就回到原文；默认直接调用本机已登录的 Codex / Kimi / Claude CLI，无需 API Key。
+- **自动目录**：有书签读书签，没有就按字号和编号识别标题，点目录跳页并高亮当前章节。
 - **可直接修改的设置摘要**：服务、模型、语言、版式和术语库就在工作区改；「更多」里才是页面范围、Key 和高级选项。
 
 > [!TIP]
@@ -149,6 +151,32 @@ python app.py --server-only   # 只启动本地服务，用浏览器访问 http:
   <img src="docs/screenshots/reader-margin-gpt4.png" width="88%" alt="页边距批注"/>
 </div>
 
+### AI 助读与自动目录
+
+阅读器右上角的「AI 助读」把「选中一句 → 提问 → 回到原文」串成一步：
+
+- **引用提问**：在正文里选中一句，右键选「引用提问…」，选中的原文会作为引用卡片带进右侧面板；
+  可以直接问「这个结论有实验支撑吗？」，也可以用推荐问题里的「解释这段」「它和上下文矛盾吗？」。
+- **回答带出处**：回答中的每个论断后面都有 `p.N` 出处芯片，点一下回到对应页并闪烁高亮原文；
+  回答末尾还有「依据」列表（页码 + 章节 + 原文片段）。片段由本机从 PDF 文本里检索补全，
+  不是让模型自由编页码。
+- **模型来源**：默认自动检测本机已登录的 **Codex CLI / Kimi Code CLI / Claude Code** 并直接调用，
+  不需要 API Key；也可以在面板的「模型设置」里改用任意 OpenAI 兼容接口（Base URL、模型名、
+  API Key），Key 用 Windows DPAPI 加密保存。CLI 未安装或未登录时会给出具体提示。
+- **自动目录**：左侧新增「目录」页签。优先读 PDF 自带书签；没有书签时按字号、加粗、编号和
+  常见章节名自动识别标题（含双栏论文的阅读顺序）。点击条目跳页并高亮标题，滚动时自动高亮
+  当前章节，支持按标题过滤和「重新识别」。
+- **隐私**：提问时只把检索到的相关原文片段（约 1 万字以内）发送给你选择的模型；
+  PDF、批注、AI 会话记录都留在本机。
+
+<div align="center">
+  <img src="docs/screenshots/reader-toc.png" width="88%" alt="自动识别目录"/>
+</div>
+
+<div align="center">
+  <img src="docs/screenshots/reader-ai.png" width="88%" alt="AI 助读：引用提问与出处"/>
+</div>
+
 ### 页面文字与字体
 
 选中「页面文字」工具后点击页面即可就地输入，不再弹出独立编辑窗口：
@@ -246,6 +274,8 @@ BabelDOC Studio 把这条链路收进一个本地桌面应用：
 - [x] 页面文字就地编辑、字体分组与导入字体
 - [x] 结果库、术语库预设、费用统计
 - [x] 免费模型与 Google 免费翻译适配
+- [x] AI 助读：引用提问、回答带 `[pN]` 出处、点击回到原文
+- [x] 自动识别目录（PDF 书签 / 字号启发式）与章节跳转
 - [ ] 扫描版 PDF 的完整 OCR 流程
 - [ ] macOS / Linux 安装包与原生字体列表
 - [ ] 同时启用多个术语库
@@ -262,6 +292,12 @@ BabelDOC Studio 把这条链路收进一个本地桌面应用：
 6. 阅读器按视口附近懒加载页面，刚滚动到新页时文字层可能有一小段补齐延迟。
 7. 页面文字导出到 PDF 时使用兼容字体，可能与阅读器中选择的本地字体略有差异。
 8. 目前只提供 Windows 字体列表；macOS / Linux 会回退到系统通用字库。
+9. AI 助读默认调用本机已登录的 Codex / Kimi / Claude CLI；未安装或未登录时，需要在面板里改用
+   API Key，或先在终端完成对应 CLI 的登录。
+10. 自动目录是启发式识别：没有样式、没有编号的标题可能漏掉，且最多扫描前 80 页；
+   可以点「重新识别」重试，或在有 PDF 书签的文件上使用。
+11. 回答里的页码由模型按给定材料标注，再由本机校验并补全引用片段；极少数压缩或特殊排版的
+   PDF 可能定位不到原文，此时会跳到对应页而不是高亮具体行。
 
 ## 开发
 
@@ -278,6 +314,8 @@ core/
   runner.py             调用 BabelDOC、流式日志、阶段进度、产物重命名
   library.py            结果库：扫描 / 分组 / 合集 / 重命名 / 回收站 / 缩略图
   annotations.py        阅读批注的本地存储
+  ai_reader.py          AI 助读：检索、prompt、CLI / API 适配、引文解析
+  toc.py                目录：PDF 书签读取与启发式标题识别
   fonts.py              本机 / 导入字体注册与字体文件服务
   pdfexport.py          把批注写成标准 PDF 注释，并从 PDF 读回
   presets.py            预设术语库的安装与去重
@@ -288,6 +326,8 @@ web/
   viewer.html           内置 PDF 阅读器 + 批注
   app.js               工作区交互
   viewer.js            阅读器与批注逻辑
+  reader-toc.js        阅读器目录面板
+  reader-ai.js         阅读器 AI 助读面板
   styles.css / viewer.css
   pdfjs/                PDF.js 本地副本
 tests/                  离线测试与阅读器 UI 冒烟
@@ -305,6 +345,9 @@ python -m pytest -q
 
 # 阅读器 UI 冒烟（Playwright + Edge）
 python tests/reader_ui_smoke.py
+
+# AI 助读 + 自动目录 UI 冒烟（Playwright + Edge）
+python tests/reader_ai_toc_ui.py
 
 # 构建 Windows 免安装包
 python tools/build_portable.py

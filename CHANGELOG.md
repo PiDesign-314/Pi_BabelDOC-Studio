@@ -1,5 +1,37 @@
 # 更新日志
 
+## v1.5.0 — 2026-11-08
+
+本版给阅读器加上「AI 助读」与「自动目录」：选中原文就能带着出处提问，没有书签的论文也能点目录跳页。
+
+### AI 助读（Grounded Reading）
+- **引用提问**：选中正文 → 右键 →「引用提问…」，选中的原文作为引用卡片进入右侧 AI 面板；
+  推荐问题含「这个结论有实验支撑吗？」「解释这段」「它和上下文矛盾吗？」。
+- **回答带出处**：回答中的论断后标 `[pN]`，渲染成可点击的 `p.N` 芯片；点击回到对应页并闪烁
+  高亮原文。回答末尾附「依据」列表（页码 + 章节 + 原文片段）。片段由本机从 PDF 文本检索补全，
+  模型只负责标注页码，避免编造位置。
+- **本机 CLI 优先**：自动探测并使用本机已登录的 Codex CLI / Kimi Code CLI / Claude Code，
+  不需要 API Key；也可以在面板里改填任意 OpenAI 兼容接口（Base URL + 模型 + Key，DPAPI 加密）。
+  未安装 / 未登录会在错误卡片里给出修复提示。
+- **会话与隐私**：按文档保存最近 40 条问答（localStorage），可一键清空；只把检索到的相关原文
+  片段（≤16000 字符）发给所选模型，PDF 与批注仍只留在本机。
+- 新接口：`GET /api/reader/toc`、`POST /api/reader/ask`、`GET /api/ai/status`、
+  `GET/POST /api/ai/settings`；新增 `core/toc.py`、`core/ai_reader.py`、
+  `web/reader-ai.js`、`web/reader-ai.css`。
+- 目录与引用跳转通过 `viewer.js` 暴露的 `window.ReaderBridge`（`goToPage` / `flashText` /
+  `whenReady` / `reader:pagechange` 事件）实现，阅读器与两个新面板互不侵入。
+
+### 自动目录
+- 左侧栏新增「目录」页签：优先读 PDF 自带书签；没有书签时按字号、加粗、编号与常见章节名
+  自动识别标题（双栏论文按 gutter 还原阅读顺序），并给出「PDF 大纲 / 自动识别」来源徽标。
+- 点击条目跳页并高亮标题，滚动时自动高亮当前章节；支持标题过滤与「重新识别」。
+- 目录结果按文档路径 + mtime 缓存到 `%APPDATA%\BabelDOC-Studio\ai\`，再次打开即时显示。
+
+### 测试
+- 新增 `tests/test_toc.py`、`tests/test_ai_reader.py`（95 passed）、
+  `tests/reader_ai_toc_ui.py`（Playwright 冒烟：目录跳页、右键引用、出处跳转）。
+- 真实 Codex 端到端冒烟：在 NIPS 2017 论文上识别出 23 条目录；提问 35 秒返回带 8 处引文的回答。
+
 ## v1.4.0 — 2026-11-05
 
 本版把界面整体切换到 Apple HIG 设计语言，并重做阅读器的文字、批注与工具栏交互。

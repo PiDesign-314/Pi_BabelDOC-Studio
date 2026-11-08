@@ -1,0 +1,350 @@
+/* ------------------------------------------------------------------ *
+ *  BabelDOC Studio — reader 目录 panel (#panel-toc)
+ *  Only theme variables from styles.css / viewer.css are used, so the
+ *  panel follows the light / dark switch without extra rules.
+ * ------------------------------------------------------------------ */
+
+/* The panel is a fixed tool head plus a scrolling tree; viewer.css leaves
+   .r-panel scrollable, which would scroll the toolbar away. */
+.r-panel-toc {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------- head -- */
+.r-toc-head {
+  flex: none;
+  z-index: 2;
+  padding: 3px 10px 7px;
+  background: color-mix(in srgb, var(--card-soft) 88%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  backdrop-filter: saturate(160%) blur(10px);
+  -webkit-backdrop-filter: saturate(160%) blur(10px);
+}
+
+.r-toc-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 6px;
+}
+
+.r-toc-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--fill-1);
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.r-toc-source[data-source="outline"] {
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 11%, transparent);
+  border-color: color-mix(in srgb, var(--blue) 24%, transparent);
+}
+.r-toc-source[data-source="heuristic"] {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  border-color: color-mix(in srgb, var(--green) 26%, transparent);
+}
+.r-toc-source[data-source="none"],
+.r-toc-source[data-source="loading"],
+.r-toc-source[data-source="error"] {
+  color: var(--text-3);
+}
+
+.r-toc-count {
+  flex: none;
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.r-toc-refresh {
+  margin-left: auto;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.r-toc-refresh:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.r-toc-refresh:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+.r-toc-refresh:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+.r-toc-refresh.spin svg {
+  animation: r-toc-spin 0.9s linear infinite;
+}
+@keyframes r-toc-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* -------------------------------------------------------------- filter -- */
+.r-toc-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text-3);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.r-toc-search:focus-within {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 14%, transparent);
+}
+.r-toc-search svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+.r-toc-filter {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.r-toc-filter::placeholder { color: var(--text-3); }
+.r-toc-filter:disabled { cursor: progress; }
+.r-toc-filter::-webkit-search-cancel-button { -webkit-appearance: none; }
+
+/* ---------------------------------------------------------------- tree -- */
+.r-toc-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 4px 6px 16px;
+}
+
+.r-toc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.r-toc-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-height: 27px;
+  padding: 5px 7px 5px calc(7px + var(--lv, 0) * 11px);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.r-toc-item:hover {
+  background: var(--card);
+  color: var(--text);
+}
+.r-toc-item:focus-visible {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 20%, transparent);
+}
+.r-toc-item.on {
+  background: color-mix(in srgb, var(--blue) 10%, var(--card));
+  color: var(--text);
+}
+.r-toc-item.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--blue);
+}
+.r-toc-item.on .r-toc-page { color: var(--blue); }
+
+.r-toc-item[data-level="1"] {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.r-toc-item[data-level="3"],
+.r-toc-item[data-level="4"],
+.r-toc-item[data-level="5"],
+.r-toc-item[data-level="6"] {
+  font-size: 11px;
+}
+
+.r-toc-title {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.r-toc-page {
+  flex: none;
+  margin-left: auto;
+  padding-top: 1px;
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------- loading / states -- */
+.r-toc-loading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 8px 7px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.r-toc-loading .r-spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 1.6px;
+}
+
+.r-toc-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 7px 10px;
+}
+.r-toc-skeleton i {
+  position: relative;
+  display: block;
+  height: 21px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--fill-1);
+}
+.r-toc-skeleton i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--card) 60%, transparent),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: r-toc-shimmer 1.3s ease-in-out infinite;
+}
+.r-toc-skeleton i:nth-child(2) { width: 82%; margin-left: 11px; }
+.r-toc-skeleton i:nth-child(3) { width: 70%; margin-left: 22px; }
+.r-toc-skeleton i:nth-child(4) { width: 88%; }
+.r-toc-skeleton i:nth-child(5) { width: 64%; margin-left: 22px; }
+.r-toc-skeleton i:nth-child(6) { width: 78%; margin-left: 11px; }
+@keyframes r-toc-shimmer {
+  to { transform: translateX(100%); }
+}
+
+.r-toc-empty,
+.r-toc-error {
+  margin: 14px 4px;
+  padding: 14px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card) 60%, transparent);
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.6;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.r-toc-empty p { margin: 0 0 7px; }
+.r-toc-empty p:last-child { margin-bottom: 0; }
+.r-toc-empty-hint { font-size: 10.5px; color: var(--text-3); opacity: 0.85; }
+.r-toc-nomatch { margin: 12px 4px; }
+
+.r-toc-error {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  color: var(--text-2);
+}
+.r-toc-error-title {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.r-toc-error-msg { margin: 0 0 9px; }
+.r-toc-retry {
+  height: 26px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.r-toc-retry:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.r-toc-retry:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------- sidebar tab fit -- */
+/* Three tabs in a 178px sidebar need tighter insets than the original. */
+.r-tabs { gap: 2px; padding: 8px 7px 5px; }
+.r-tabs .r-tab { padding: 0 4px; font-size: 11.5px; }
+.r-tabs .r-tab .r-count { margin-left: 3px; font-size: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .r-toc-refresh.spin svg,
+  .r-toc-skeleton i::after { animation: none; }
+}

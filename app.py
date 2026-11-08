@@ -29,6 +29,7 @@ BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))
 
 from core import (  # noqa: E402
+    ai_reader,
     annotations,
     config,
     fonts,
@@ -39,15 +40,16 @@ from core import (  # noqa: E402
     presets,
     providers,
     runner,
+    toc as toc_reader,
 )
 from core.languages import LANGUAGES  # noqa: E402
 
 WEB_DIR = BASE_DIR / "web"
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 # The reader checks these before trusting the server with the newer annotation
 # types; a stale process keeps an old API alive and silently drops them.
-API_FEATURES = ("text", "ink", "styles", "fonts", "margin-notes")
+API_FEATURES = ("text", "ink", "styles", "fonts", "margin-notes", "toc", "ai-reader")
 
 
 def _build_id() -> int:
@@ -956,6 +958,79 @@ def read_annotations_pdf():
     except Exception as exc:
         return _error(f"无法读取 PDF 批注：{exc}", 500)
     return _json({"items": items, "count": len(items)})
+
+
+# --------------------------------------------------------------------------- #
+# Reader TOC + AI reading
+# --------------------------------------------------------------------------- #
+@app.get("/api/reader/toc")
+def reader_toc():
+    target = _allowed_file(request.args.get("path", ""), (".pdf",))
+    if not target:
+        return _error("文件不可用", 404)
+    force = (request.args.get("force") or "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    try:
+        data = toc_reader.read_toc(target, force=force)
+    except FileNotFoundError:
+        return _error("文件不存在", 404)
+    except Exception as exc:
+        return _error(f"目录识别失败：{exc}", 500)
+    return _json(data)
+
+
+@app.post("/api/reader/ask")
+def reader_ask():
+    payload = request.get_json(silent=True) or {}
+    target = _allowed_file(payload.get("path", ""), (".pdf",))
+    if not target:
+        return _error("文件不可用", 404)
+    question = str(payload.get("question") or "").strip()
+    if not question:
+        return _error("请输入问题", 400)
+    quote = payload.get("quote")
+    if not isinstance(quote, dict):
+        quote = None
+    history = payload.get("history")
+    if not isinstance(history, list):
+        history = []
+    provider = payload.get("provider")
+    if not isinstance(provider, (dict, str)):
+        provider = None
+    try:
+        result = ai_reader.answer(str(target), question, quote, history, provider)
+    except ai_reader.ReaderError as exc:
+        return _error(str(exc), exc.status)
+    except Exception as exc:
+        return _error(f"AI 助读失败：{exc}", 500)
+    return _json(result)
+
+
+@app.get("/api/ai/status")
+def ai_status():
+    providers_status = ai_reader.detect_providers()
+    return _json(
+        {
+            "providers": providers_status,
+            "configured": config.public_ai_settings(),
+            "default": ai_reader.default_provider(providers_status),
+        }
+    )
+
+
+@app.get("/api/ai/settings")
+def ai_settings_get():
+    return _json(config.public_ai_settings())
+
+
+@app.post("/api/ai/settings")
+def ai_settings_save():
+    payload = request.get_json(silent=True) or {}
+    try:
+        return _json(config.save_ai_settings(payload))
+    except Exception as exc:
+        return _error(f"保存 AI 设置失败：{exc}", 500)
 
 
 # --------------------------------------------------------------------------- #
