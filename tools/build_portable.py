@@ -13,6 +13,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# GitHub Actions 的 Windows runner 用 cp1252 解码 stdout，打印中文会抛 UnicodeEncodeError；
+# 统一切到 UTF-8，交互式控制台也不会因此报错。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 ROOT = Path(__file__).resolve().parents[1]
 SIGN_SCRIPT = ROOT / 'tools' / 'sign_release.ps1'
 

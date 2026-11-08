@@ -43,6 +43,8 @@ jobs:
           Remove-Item $pfx -Force
       - name: Build portable package
         shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           if ($env:SIGN_CERT_THUMBPRINT) {
             python tools/build_portable.py --sign
