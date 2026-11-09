@@ -11,3 +11,9 @@
 >   或等待签名版。
 >
 > 完整排查步骤与签名进度：<https://github.com/PiDesign-314/Pi_BabelDOC-Studio/blob/main/docs/SMART-APP-CONTROL.md>
+
+> [!NOTE]
+> **启动方式：未签名版请双击 `Start.bat`。** 包内也提供 `BabelDOC Studio.exe`，它和 `Start.bat`
+> 启动的是同一个应用；但未签名的 exe 在 Windows 11 智能应用控制下更容易被按「未签名应用」拦截，
+> 所以当前版本仍以 `Start.bat` 作为首选入口。等代码签名配置完成后，会改为直接双击
+> `BabelDOC Studio.exe`（签名的 exe 才能降低 SAC / SmartScreen 的拦截概率）。

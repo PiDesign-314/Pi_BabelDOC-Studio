@@ -11,6 +11,7 @@ The AI request itself is stubbed in-process, so the test never spends model
 quota; only the HTTP plumbing and the UI are exercised.
 """
 
+import base64
 import sys
 import threading
 import uuid
@@ -72,7 +73,11 @@ FAKE_CITATIONS = [
 ]
 
 
-def fake_answer(path, question, quote, history, provider):
+captured_requests = []
+
+
+def fake_answer(path, question, quote, history, provider, images=None):
+    captured_requests.append({"question": question, "quote": quote, "images": images or []})
     return {
         "answer": FAKE_ANSWER,
         "citations": FAKE_CITATIONS,
@@ -84,6 +89,14 @@ def fake_answer(path, question, quote, history, provider):
 
 
 ai_reader.answer = fake_answer
+
+PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+shot_path = root / "shot.png"
+shot_path.write_bytes(PNG_BYTES)
+shot2_path = root / "shot2.png"
+shot2_path.write_bytes(PNG_BYTES)
 
 server = make_server("127.0.0.1", 0, app.app, threaded=True)
 threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -151,6 +164,49 @@ with sync_playwright() as p:
     page.wait_for_selector(".r-ai-msg.assistant", timeout=30000)
     page.wait_for_selector('.r-ai-cite[data-page="2"]', timeout=10000)
     page.screenshot(path=str(root / "ai-answer.png"))
+
+    # 消息层级：用户气泡右对齐且与 AI 卡片不同底色；AI 回复有身份标识
+    layout = page.evaluate(
+        """() => {
+          const user = document.querySelector('.r-ai-msg.user');
+          const assistant = document.querySelector('.r-ai-msg.assistant');
+          const who = assistant ? assistant.querySelector('.r-ai-who') : null;
+          const box = document.querySelector('#ai-form .r-ai-box');
+          const send = document.querySelector('#ai-send');
+          const ur = user.getBoundingClientRect();
+          const ar = assistant.getBoundingClientRect();
+          const us = getComputedStyle(user);
+          const as = getComputedStyle(assistant);
+          const bs = box ? getComputedStyle(box) : null;
+          const ss = send ? getComputedStyle(send) : null;
+          return {
+            userBg: us.backgroundColor,
+            assistantBg: as.backgroundColor,
+            userLeft: ur.left,
+            assistantLeft: ar.left,
+            userWidth: ur.width,
+            assistantWidth: ar.width,
+            who: who ? who.textContent : '',
+            radius: bs ? parseFloat(bs.borderTopLeftRadius) : 0,
+            placeholder: document.querySelector('#ai-input').placeholder,
+            sendWidth: ss ? parseFloat(ss.width) : 0,
+            sendRadius: ss ? ss.borderTopLeftRadius : '',
+            mic: document.querySelectorAll('#ai-form [title*="语音"], #ai-form [data-mic], #ai-form [aria-label*="语音"]').length,
+            attach: Boolean(document.querySelector('#ai-attach')),
+          };
+        }"""
+    )
+    assert layout["userBg"] != layout["assistantBg"], layout
+    assert layout["userLeft"] > layout["assistantLeft"] + 24, layout
+    assert layout["userWidth"] < layout["assistantWidth"] * 0.95, layout
+    assert "AI 助读" in layout["who"], layout
+    assert "Codex" in layout["who"], layout
+    assert layout["radius"] >= 20, layout
+    assert layout["placeholder"] == "向 AI 提问，或上传图片…", layout
+    assert layout["sendWidth"] >= 28 and layout["sendWidth"] <= 34, layout
+    assert layout["mic"] == 0 and layout["attach"], layout
+    assert captured_requests[-1]["images"] == [], captured_requests[-1]
+
     cited_pages = page.eval_on_selector_all(
         ".r-ai-cite", "els => els.map((el) => Number(el.dataset.page))"
     )
@@ -159,12 +215,108 @@ with sync_playwright() as p:
     page.wait_for_function("() => document.querySelector('#page-input').value === '2'")
     page.wait_for_timeout(600)
 
+    # 图片附件：上传 → 缩略图预览 → 随问题一起发送 → 发送后清空
+    page.set_input_files("#ai-image-file", str(shot_path))
+    page.wait_for_selector(".r-ai-attach-item img", timeout=8000)
+    assert page.locator(".r-ai-attach-item").count() == 1
+    page.fill("#ai-input", "这张截图说明了什么？")
+    page.click("#ai-send")
+    page.wait_for_function(
+        "() => document.querySelectorAll('.r-ai-msg.assistant').length >= 2", timeout=30000
+    )
+    sent = captured_requests[-1]
+    assert sent["images"] and len(sent["images"]) == 1, sent
+    assert sent["images"][0]["mime"] == "image/png", sent
+    assert page.locator("#ai-attachments").is_hidden(), "发送后应清空图片预览"
+    assert page.locator(".r-ai-msg.user").last.locator(".r-ai-msg-images").count() == 1
+    page.wait_for_timeout(300)
+    page.screenshot(path=str(root / "ai-answer-image.png"))
+
+    # 多图预览 / 单张删除 / 拖拽上传
+    page.set_input_files("#ai-image-file", [str(shot_path), str(shot2_path)])
+    page.wait_for_function(
+        "() => document.querySelectorAll('.r-ai-attach-item').length === 2", timeout=8000
+    )
+    page.locator(".r-ai-attach-x").first.click()
+    page.wait_for_function(
+        "() => document.querySelectorAll('.r-ai-attach-item').length === 1", timeout=8000
+    )
+    page.locator(".r-ai-attach-x").first.click()
+    page.wait_for_function(
+        "() => document.querySelector('#ai-attachments').hidden", timeout=8000
+    )
+    page.evaluate(
+        """(b64) => {
+            const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+            const file = new File([bytes], 'drag.png', { type: 'image/png' });
+            const data = new DataTransfer();
+            data.items.add(file);
+            const form = document.querySelector('#ai-form');
+            form.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data }));
+            form.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }));
+        }""",
+        base64.b64encode(PNG_BYTES).decode("ascii"),
+    )
+    page.wait_for_function(
+        "() => document.querySelectorAll('.r-ai-attach-item').length === 1", timeout=8000
+    )
+    page.locator(".r-ai-attach-x").first.click()
+    page.wait_for_function(
+        "() => document.querySelector('#ai-attachments').hidden", timeout=8000
+    )
+
     # ----------------------------------------------------------- dark theme sanity
     page.click("#btn-theme")
     page.wait_for_timeout(300)
     page.screenshot(path=str(root / "ai-answer-dark.png"))
 
+    # ------------------------------------------------------- stop generation
+    page2 = browser.new_page(viewport={"width": 1400, "height": 1000})
+    page2.on("pageerror", lambda exc: errors.append(str(exc)))
+    page2.add_init_script(
+        """
+        var __origFetch = window.fetch.bind(window);
+        window.fetch = function (url, options) {
+          if (String(url).indexOf('/api/reader/ask') !== -1) {
+            return new Promise(function (resolve, reject) {
+              var timer = setTimeout(function () {
+                __origFetch(url, options).then(resolve, reject);
+              }, 6000);
+              var signal = options && options.signal;
+              if (signal) {
+                var abort = function () {
+                  clearTimeout(timer);
+                  reject(new DOMException('Aborted', 'AbortError'));
+                };
+                if (signal.aborted) abort();
+                else signal.addEventListener('abort', abort);
+              }
+            });
+          }
+          return __origFetch(url, options);
+        };
+        """
+    )
+    page2.goto(f"{base}/viewer?path=" + str(pdf))
+    page2.wait_for_selector(".r-page.painted", timeout=30000)
+    page2.wait_for_timeout(400)
+    page2.evaluate(
+        "() => window.ReaderAI.quote({ text: 'Page 1 paragraph 1.', parts: [{ page: 1 }] })"
+    )
+    page2.wait_for_selector("#ai-drawer:not([hidden])")
+    page2.fill("#ai-input", "慢慢回答一下")
+    page2.click("#ai-send")
+    page2.wait_for_selector("#ai-send.is-stop", timeout=8000)
+    page2.click("#ai-send")
+    page2.wait_for_selector(".r-ai-msg.stopped", timeout=10000)
+    assert "已停止生成" in page2.locator(".r-ai-msg.stopped").inner_text()
+    assert page2.locator(".r-ai-msg.pending").count() == 0
+    page2.wait_for_timeout(300)
+
     assert not errors, errors
-    print("AI + TOC UI PASS: toc jump, quote menu, grounded answer, citation jump; no JS errors")
+    print(
+        "AI + TOC UI PASS: toc jump, quote menu, grounded answer, citation jump, "
+        "message hierarchy, Claude-style composer, image upload, stop generation; no JS errors"
+    )
     browser.close()
 server.shutdown()

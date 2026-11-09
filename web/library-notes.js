@@ -649,7 +649,7 @@
     head.className = "notes-group-head";
     const name = document.createElement("h3");
     name.className = "notes-group-name";
-    name.textContent = group.path ? fileName(group.path) : "手动笔记";
+    name.textContent = group.path ? fileName(group.path) : "独立笔记";
     if (group.path) name.title = group.path;
     const count = document.createElement("em");
     count.className = "notes-group-count";
@@ -715,7 +715,7 @@
     } else if (!source.path) {
       const from = document.createElement("span");
       from.className = "note-src";
-      from.textContent = "手动笔记";
+      from.textContent = "独立笔记";
       meta.append(from);
     }
 

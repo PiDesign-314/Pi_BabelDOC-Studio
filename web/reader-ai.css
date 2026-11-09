@@ -165,8 +165,8 @@ body.r-ai-resizing .r-ai-resize::after { opacity: 0.75; }
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+  gap: 4px;
+  padding: 14px 14px 18px;
   scrollbar-width: thin;
 }
 
@@ -194,23 +194,30 @@ body.r-ai-resizing .r-ai-resize::after { opacity: 0.75; }
   to { opacity: 1; transform: none; }
 }
 
+/* 用户提问：右对齐的浅色气泡；AI 回答：左对齐的阅读卡片。
+   两者用颜色、对齐、圆角和身份标识区分，而不是传统 IM 的大小气泡。 */
 .r-ai-msg.user {
   align-self: flex-end;
-  max-width: 88%;
-  padding: 8px 11px;
-  border: 1px solid var(--line);
-  border-radius: 12px 12px 4px 12px;
-  background: var(--card);
+  max-width: 84%;
+  margin-top: 16px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 13%, var(--line));
+  border-radius: 14px 14px 4px 14px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  color: var(--text);
   line-height: 1.6;
   white-space: pre-wrap;
 }
+.r-ai-msg.user:first-child { margin-top: 0; }
+.r-ai-msg.assistant + .r-ai-msg.user { margin-top: 22px; }
+.r-ai-msg.user + .r-ai-msg.assistant { margin-top: 8px; }
 
 .r-ai-msg-quote {
   margin: 0 0 6px;
   padding: 5px 8px;
   border-left: 2px solid var(--accent);
   border-radius: 4px;
-  background: color-mix(in srgb, var(--accent) 7%, var(--card-soft, var(--card)));
+  background: color-mix(in srgb, var(--card) 72%, transparent);
   font-size: 11.5px;
   line-height: 1.55;
 }
@@ -234,27 +241,60 @@ body.r-ai-resizing .r-ai-resize::after { opacity: 0.75; }
   color: var(--text-2);
 }
 .r-ai-msg-text { white-space: pre-wrap; }
+.r-ai-msg-images {
+  margin-top: 5px;
+  color: var(--text-3);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+}
 
 .r-ai-msg.assistant {
   align-self: stretch;
-  padding: 9px 11px 10px;
-  border: 1px solid var(--line);
-  border-radius: 12px 12px 12px 4px;
+  padding: 11px 13px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
+  border-radius: 12px;
   background: var(--card);
-  line-height: 1.68;
+  line-height: 1.7;
 }
+
+/* 轻量身份标识：克制地提示「这是 AI 的回答」。 */
+.r-ai-who {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 8px;
+  color: var(--text-3);
+  font-size: 10.5px;
+  line-height: 1;
+}
+.r-ai-who-ico { color: var(--accent); font-size: 10px; }
+.r-ai-who-name {
+  color: var(--text-2);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.r-ai-who-sep { color: var(--text-3); opacity: 0.6; }
+.r-ai-who-model { color: var(--text-3); }
 
 .r-ai-msg.pending {
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px 12px 12px 4px;
-  background: var(--card);
+  margin-top: 6px;
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: 11.5px;
+}
+
+.r-ai-msg.stopped {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 2px 4px;
+  color: var(--text-3);
+  font-size: 11.5px;
 }
 
 .r-ai-dots { display: inline-flex; align-items: center; gap: 4px; }
@@ -277,11 +317,12 @@ body.r-ai-resizing .r-ai-resize::after { opacity: 0.75; }
 
 .r-ai-msg.error {
   align-self: stretch;
-  padding: 9px 11px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
-  border-left: 3px solid var(--accent);
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-left: 2px solid color-mix(in srgb, var(--accent) 60%, var(--line));
   border-radius: 10px;
-  background: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent) 5%, var(--card));
   color: var(--text);
 }
 
@@ -451,9 +492,10 @@ body.r-ai-resizing .r-ai-resize::after { opacity: 0.75; }
   gap: 2px;
   margin: 0 12px 4px;
   padding: 7px 26px 7px 10px;
-  border-left: 3px solid var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--line));
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, var(--line));
   border-radius: 8px;
-  background: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent) 5%, var(--card));
 }
 
 #ai-quote[hidden] { display: none !important; }
@@ -517,73 +559,186 @@ body.r-ai-resizing .r-ai-resize::after { opacity: 0.75; }
 .r-ai-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ------------------------------------------------------------ compose -- */
+/* Claude 风格输入区：整体一个浅色大圆角容器，输入在上面、工具栏在下面。 */
 #ai-form {
   flex: none;
+  padding: 4px 12px 12px;
+}
+
+.r-ai-box {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 9px 12px 11px;
-  border-top: 1px solid var(--line);
+  gap: 6px;
+  padding: 9px 9px 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 22px;
   background: var(--card);
+  box-shadow: 0 6px 20px rgba(15, 15, 25, 0.06);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#ai-form.dragging .r-ai-box {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
 #ai-input {
   width: 100%;
-  min-height: 54px;
-  max-height: 160px;
-  padding: 7px 9px;
-  border-radius: 9px;
-  font-size: 13px;
-  line-height: 1.5;
+  min-height: 24px;
+  max-height: 132px;
+  padding: 2px 2px 0;
+  border: none;
+  outline: none;
   resize: none;
-  background: var(--card-soft);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-y: hidden;
+}
+
+#ai-input::placeholder { color: var(--text-3); }
+#ai-input:focus {
+  border: none;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
 }
 
 .r-ai-compose-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 5px;
 }
 
-#ai-model-btn {
-  min-width: 0;
-  max-width: 66%;
-  padding: 3px 8px;
+.r-ai-attach {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 50%;
   background: var(--card-soft);
   color: var(--text-2);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.r-ai-attach:hover {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.r-ai-attach:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+#ai-model-btn {
+  flex: none;
+  max-width: 48%;
+  padding: 4px 7px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-3);
   font-family: inherit;
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
-#ai-model-btn:hover { border-color: var(--accent); color: var(--accent); }
+#ai-model-btn:hover { color: var(--accent); background: var(--accent-soft); }
+
+.r-ai-compose-spacer { flex: 1; min-width: 4px; }
+
+.r-ai-compose-hint {
+  flex: none;
+  color: var(--text-3);
+  font-size: 10px;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
 
 #ai-send {
   flex: none;
-  height: 29px;
-  padding: 0 15px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 650;
+  border-radius: 50%;
+  background: var(--text);
+  color: var(--card);
   cursor: pointer;
-  transition: background 0.15s ease, opacity 0.15s ease;
+  transition: opacity 0.15s ease, transform 0.12s ease, background 0.15s ease;
 }
 
-#ai-send:hover { background: var(--accent-hover); }
-#ai-send:disabled { opacity: 0.45; cursor: default; background: var(--accent); }
+#ai-send:hover { opacity: 0.88; }
+#ai-send:active { transform: scale(0.94); }
+#ai-send:disabled { opacity: 0.28; cursor: default; }
+#ai-send.is-stop { background: var(--accent); color: #fff; opacity: 1; }
 #ai-send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 图片缩略图预览：贴在输入框内部上方，每张都能单独删除。 */
+.r-ai-attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 2px 4px;
+}
+
+.r-ai-attach-list[hidden] { display: none !important; }
+
+.r-ai-attach-item {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card-soft);
+  overflow: hidden;
+}
+
+.r-ai-attach-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.r-ai-attach-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.r-ai-attach-x:hover { background: rgba(0, 0, 0, 0.78); }
+
+/* 窄栏下隐藏键盘提示，避免把输入框挤满。 */
+.r-ai { container-type: inline-size; }
+@container (max-width: 430px) {
+  .r-ai-compose-hint { display: none; }
+}
 
 /* ----------------------------------------------------------- settings -- */
 #ai-settings {

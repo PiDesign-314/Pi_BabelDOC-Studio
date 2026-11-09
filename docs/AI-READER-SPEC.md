@@ -64,9 +64,16 @@
     "model": "",
     "base_url": "",
     "api_key": ""
-  }
+  },
+  "images": [
+    {"data_url": "data:image/png;base64,iVBORw0KG...", "name": "screenshot.png"}
+  ]
 }
 ```
+
+- `images` 可选，最多 4 张；只接受 PNG / JPEG / WebP / GIF 的 data URL，单张 ≤ 6 MB、总计 ≤ 12 MB，
+  不合法时返回 400。API 模型会收到 OpenAI 兼容的视觉内容块；CLI 模型会把图片写到临时工作目录，
+  并在 prompt 末尾告知文件名（由 CLI 自己的文件读取能力查看）。
 
 响应：
 
@@ -126,7 +133,7 @@
 
 ## 3. 模型适配（`core/ai_reader.py`）
 
-统一入口：`answer(path, question, quote, history, provider) -> dict`。
+统一入口：`answer(path, question, quote, history, provider, images=None) -> dict`。
 
 1. **检索**：PyMuPDF 逐页抽文本（缓存 `ai/text-<sha1>.json`），按页切块 + 简易 BM25 打分，
    结合「引用所在页 ±1 页」「问题关键词匹配的页」「含 Table/Figure/experiment/results/ablation 的页」

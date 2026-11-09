@@ -12,6 +12,8 @@ keys.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import math
@@ -35,6 +37,12 @@ MIN_CHUNKS = 6
 MAX_CHUNKS = 10
 MAX_CONTEXT_CHARS = 16000
 VERSION_TTL = 60.0
+
+# Optional images sent with a reader question (the composer's attach button).
+MAX_IMAGES = 4
+MAX_IMAGE_BYTES = 6 * 1024 * 1024
+MAX_IMAGES_TOTAL_BYTES = 12 * 1024 * 1024
+ALLOWED_IMAGE_MIME = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
 
 AI_PRESETS = {
     "moonshot": {
@@ -129,6 +137,132 @@ def _scrub(text: str, secret: str = "") -> str:
 def _tail(text: str, limit: int = 400) -> str:
     value = re.sub(r"\s+", " ", str(text or "")).strip()
     return value[-limit:] if len(value) > limit else value
+
+
+# --------------------------------------------------------------------------- #
+# Image attachments
+# --------------------------------------------------------------------------- #
+_IMAGE_DATA_URL_RE = re.compile(
+    r"^data:(image/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=\s]+)$"
+)
+_IMAGE_EXTENSIONS = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _image_mime(value) -> str:
+    mime = str(value or "").strip().lower()
+    return mime if mime in ALLOWED_IMAGE_MIME else ""
+
+
+def _clean_image_name(raw_name, index: int, mime: str) -> str:
+    name = _CONTROL_CHARS_RE.sub("", str(raw_name or "")).strip()
+    # Keep only the basename: the name is metadata, never a path to write to.
+    name = name.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not name:
+        name = f"image-{index}.{_IMAGE_EXTENSIONS.get(mime, 'png')}"
+    return name[:120]
+
+
+def _parse_one_image(entry, index: int) -> dict:
+    if not isinstance(entry, dict):
+        raise ReaderError("图片格式不正确", 400)
+
+    # Already normalized entries: app.py validates before calling answer(),
+    # and answer() defensively re-parses its ``images`` argument.
+    if entry.get("data_url") is None and isinstance(entry.get("bytes"), (bytes, bytearray)):
+        mime = _image_mime(entry.get("mime"))
+        if not mime:
+            raise ReaderError("图片格式不正确", 400)
+        data = bytes(entry["bytes"])
+        if len(data) > MAX_IMAGE_BYTES:
+            raise ReaderError("单张图片太大了（最多 6 MB）", 400)
+        return {
+            "mime": mime,
+            "bytes": data,
+            "name": _clean_image_name(entry.get("name"), index, mime),
+        }
+
+    data_url = entry.get("data_url")
+    if not isinstance(data_url, str):
+        raise ReaderError("图片格式不正确", 400)
+    match = _IMAGE_DATA_URL_RE.match(data_url.strip())
+    if not match:
+        raise ReaderError("图片格式不正确", 400)
+    mime = match.group(1).lower()
+    payload = re.sub(r"\s+", "", match.group(2))
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError):
+        raise ReaderError("图片数据无法识别", 400) from None
+    if not data:
+        raise ReaderError("图片数据无法识别", 400)
+    if len(data) > MAX_IMAGE_BYTES:
+        raise ReaderError("单张图片太大了（最多 6 MB）", 400)
+    return {
+        "mime": mime,
+        "bytes": data,
+        "name": _clean_image_name(entry.get("name"), index, mime),
+    }
+
+
+def parse_image_payloads(raw) -> list[dict]:
+    """Validate the optional ``images`` field of ``POST /api/reader/ask``.
+
+    ``None``/``[]`` means no images. Each image is an ``image/*`` data URL
+    (max 4, max 6 MB decoded each, max 12 MB total). Returns dicts with
+    ``mime``, raw ``bytes`` and a sanitized display ``name``.
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ReaderError("图片格式不正确", 400)
+    if not raw:
+        return []
+    if len(raw) > MAX_IMAGES:
+        raise ReaderError(f"最多上传 {MAX_IMAGES} 张图片", 400)
+
+    images: list[dict] = []
+    total_bytes = 0
+    for index, entry in enumerate(raw, start=1):
+        image = _parse_one_image(entry, index)
+        total_bytes += len(image["bytes"])
+        images.append(image)
+    if total_bytes > MAX_IMAGES_TOTAL_BYTES:
+        raise ReaderError("图片总大小超出限制", 400)
+    return images
+
+
+def _write_cli_images(tmp: str, images: list[dict]) -> list[str]:
+    """Write attached images into a CLI runner's temp cwd; return filenames."""
+    names: list[str] = []
+    for index, image in enumerate(images or [], start=1):
+        mime = _image_mime(image.get("mime"))
+        if not mime:
+            continue
+        filename = f"image-{index}.{_IMAGE_EXTENSIONS[mime]}"
+        try:
+            (Path(tmp) / filename).write_bytes(bytes(image.get("bytes") or b""))
+        except OSError:
+            continue
+        names.append(filename)
+    return names
+
+
+def _cli_image_note(names: list[str]) -> str:
+    """Prompt suffix telling file-reading CLI agents where the images are."""
+    if not names:
+        return ""
+    joined = "、".join(names)
+    return (
+        f"\n\n用户随问题上传了 {len(names)} 张图片，已保存在当前工作目录：{joined}。"
+        "请用你可用的图片查看工具读取这些图片后再回答；如果读不到，请明确说明。"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -793,7 +927,7 @@ def _parse_codex_stdout(stdout: str) -> tuple[str, dict]:
     return answer, usage
 
 
-def _run_codex(prompt: str, model: str = "") -> dict:
+def _run_codex(prompt: str, model: str = "", images: list[dict] | None = None) -> dict:
     info = _cli_info("codex")
     command = str(info.get("command") or _find_codex())
     if not command:
@@ -805,6 +939,7 @@ def _run_codex(prompt: str, model: str = "") -> dict:
         raise ReaderError("Codex 未登录：在终端运行 codex login 后再试", 503)
 
     tmp = tempfile.mkdtemp(prefix="babeldoc-ai-")
+    prompt = prompt + _cli_image_note(_write_cli_images(tmp, images or []))
     last = Path(tmp) / "last.txt"
     cmd = [
         command,
@@ -868,7 +1003,7 @@ def _run_codex(prompt: str, model: str = "") -> dict:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _run_kimi(prompt: str, model: str = "") -> dict:
+def _run_kimi(prompt: str, model: str = "", images: list[dict] | None = None) -> dict:
     command = _find_kimi()
     if not command:
         raise ReaderError(
@@ -876,6 +1011,7 @@ def _run_kimi(prompt: str, model: str = "") -> dict:
             503,
         )
     tmp = tempfile.mkdtemp(prefix="babeldoc-ai-")
+    prompt = prompt + _cli_image_note(_write_cli_images(tmp, images or []))
     cmd = [command, "-p", prompt]
     if model:
         cmd.extend(["-m", model])
@@ -916,7 +1052,7 @@ def _run_kimi(prompt: str, model: str = "") -> dict:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _run_claude(prompt: str, model: str = "") -> dict:
+def _run_claude(prompt: str, model: str = "", images: list[dict] | None = None) -> dict:
     command = _find_claude()
     if not command:
         raise ReaderError(
@@ -924,6 +1060,7 @@ def _run_claude(prompt: str, model: str = "") -> dict:
             503,
         )
     tmp = tempfile.mkdtemp(prefix="babeldoc-ai-")
+    prompt = prompt + _cli_image_note(_write_cli_images(tmp, images or []))
     cmd = [command, "-p", prompt, "--output-format", "json"]
     if model:
         cmd.extend(["-m", model])
@@ -981,7 +1118,7 @@ def _run_claude(prompt: str, model: str = "") -> dict:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _run_api(prompt: str, cfg: dict) -> dict:
+def _run_api(prompt: str, cfg: dict, images: list[dict] | None = None) -> dict:
     base_url = str(cfg.get("base_url") or "").strip().rstrip("/")
     model = str(cfg.get("model") or "").strip()
     api_key = str(cfg.get("api_key") or "").strip()
@@ -995,10 +1132,25 @@ def _run_api(prompt: str, cfg: dict) -> dict:
         if base_url.endswith("/chat/completions")
         else f"{base_url}/chat/completions"
     )
+    if images:
+        # OpenAI-compatible vision content blocks (text first, then images).
+        content: list[dict] = [{"type": "text", "text": prompt}]
+        for image in images:
+            mime = _image_mime(image.get("mime")) or "image/png"
+            encoded = base64.b64encode(bytes(image.get("bytes") or b"")).decode("ascii")
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{encoded}"},
+                }
+            )
+        messages = [{"role": "user", "content": content}]
+    else:
+        messages = [{"role": "user", "content": prompt}]
     body = json.dumps(
         {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "temperature": 0.2,
             "stream": False,
         }
@@ -1053,22 +1205,25 @@ def _run_api(prompt: str, cfg: dict) -> dict:
     }
 
 
-def _invoke(prompt: str, cfg: dict) -> dict:
+def _invoke(prompt: str, cfg: dict, images: list[dict] | None = None) -> dict:
     provider_id = cfg["id"]
     if provider_id == "auto":
         provider_id = _resolve_auto()
     model = str(cfg.get("model") or "")
     if provider_id == "api":
         model = model or str(cfg.get("saved_model") or "")
+    # Call the runners with two arguments when there are no images so that
+    # existing monkeypatched 2-argument runners keep working.
+    images = images or []
     if provider_id == "codex":
-        return _run_codex(prompt, model)
+        return _run_codex(prompt, model) if not images else _run_codex(prompt, model, images)
     if provider_id == "kimi":
-        return _run_kimi(prompt, model)
+        return _run_kimi(prompt, model) if not images else _run_kimi(prompt, model, images)
     if provider_id == "claude":
-        return _run_claude(prompt, model)
+        return _run_claude(prompt, model) if not images else _run_claude(prompt, model, images)
     api_cfg = dict(cfg)
     api_cfg["model"] = model
-    return _run_api(prompt, api_cfg)
+    return _run_api(prompt, api_cfg) if not images else _run_api(prompt, api_cfg, images)
 
 
 # --------------------------------------------------------------------------- #
@@ -1080,6 +1235,7 @@ def answer(
     quote: dict | None = None,
     history: list | None = None,
     provider=None,
+    images: list | None = None,
 ) -> dict:
     """Answer a question about a PDF, grounded in retrieved pages."""
     pdf = Path(path).expanduser()
@@ -1090,6 +1246,7 @@ def answer(
         raise ReaderError("请输入问题", 400)
     quote = quote if isinstance(quote, dict) else {}
     history = history if isinstance(history, list) else []
+    images = parse_image_payloads(images)
 
     context = build_context(pdf, question, quote)
     if not context["chunks"]:
@@ -1100,7 +1257,9 @@ def answer(
     prompt = build_prompt(context, question, quote, history)
     cfg = _normalize_provider(provider)
     started = time.time()
-    result = _invoke(prompt, cfg)
+    # Two-argument call when there are no images keeps old monkeypatched
+    # ``_invoke`` functions (and the pre-image contract) working unchanged.
+    result = _invoke(prompt, cfg) if not images else _invoke(prompt, cfg, images)
     elapsed = round(time.time() - started, 1)
     citations = parse_citations(
         result["text"],
@@ -1112,6 +1271,116 @@ def answer(
     return {
         "answer": str(result["text"]).strip(),
         "citations": citations,
+        "provider": str(result["provider"]),
+        "model": str(result["model"]),
+        "elapsed": elapsed,
+        "source": str(result["source"]),
+        "usage": result.get("usage") or {"input_tokens": 0, "output_tokens": 0},
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Note rewriting ("AI 帮写")
+# --------------------------------------------------------------------------- #
+NOTE_AI_MODES = ("polish", "academic", "concise", "expand", "structure", "fix", "custom")
+NOTE_AI_MAX_CHARS = 20000
+# Longer instructions are truncated silently (the first 500 chars are used).
+NOTE_AI_MAX_INSTRUCTION = 500
+
+_NOTE_AI_MODE_RULES = {
+    "polish": "润色：改善流畅度、逻辑衔接与可读性，修正不自然的表达；保留原意和作者语气，不增删事实。",
+    "academic": "学术化：改成严谨规范的学术语言，术语准确、句式紧凑；去掉口语、夸张和情绪化的说法。",
+    "concise": "精简：删除重复、冗余和铺垫，保留全部关键信息（论点、数据、结论都不能丢）。",
+    "expand": "扩写：在不虚构事实的前提下补充解释、展开观点，把跳跃的逻辑补上过渡句。",
+    "structure": "结构整理：整理成清晰的多级标题、要点列表和重点加粗，让层次一目了然；原有内容按顺序保留。",
+    "fix": "纠错：只改错别字、语病、标点和不通顺的句子；不改变风格、不改变信息量。",
+    "custom": "自定义：按用户给出的自定义要求改写。",
+}
+
+_NOTE_AI_SCOPE_RULES = {
+    "note": (
+        "输出 Markdown，沿用原文的标题层级、列表和加粗结构（##、###、-、1.、**粗体**）；"
+        "保留作者已有的信息，不要新增事实。"
+    ),
+    "selection": (
+        "只输出纯文本段落，不要使用任何 Markdown 语法（不要 #、-、**、`）；"
+        "除非上面的模式另有要求，长度与原文大致相当；调用方会把它直接插进正文中间。"
+    ),
+}
+
+NOTE_AI_SYSTEM_PROMPT = (
+    "你是 BabelDOC Studio 里的笔记编辑，负责按用户要求改写笔记原文。\n"
+    "硬性规则：\n"
+    "1. 只改写用户提供的笔记，不要回答笔记里提到的问题，也不要续写笔记之外的内容。\n"
+    "2. 禁止编造事实、数据、结论、文献引用或页码；原文没有的信息一律不添加。\n"
+    "3. 保留原语言：中文笔记输出中文，英文笔记输出英文，不要自行翻译。\n"
+    "4. 只输出改写后的正文，不要任何解释、前言、总结或客套话，也不要用 ``` 代码块包裹。"
+)
+
+
+def build_note_prompt(
+    text: str,
+    mode: str = "polish",
+    instruction: str = "",
+    scope: str = "note",
+    title: str = "",
+) -> str:
+    """One-shot prompt for :func:`rewrite_note` (``_invoke`` takes one string)."""
+    scope_rule = _NOTE_AI_SCOPE_RULES.get(scope, _NOTE_AI_SCOPE_RULES["note"])
+    sections = [
+        NOTE_AI_SYSTEM_PROMPT,
+        f"本次操作：{_NOTE_AI_MODE_RULES.get(mode, _NOTE_AI_MODE_RULES['polish'])}",
+        f"输出格式：{scope_rule}",
+    ]
+    title = str(title or "").strip()
+    if title:
+        sections.append(f"笔记标题：{title}")
+    sections.append(f'原文：\n"""\n{text}\n"""')
+    instruction = str(instruction or "").strip()
+    if instruction:
+        sections.append(f"自定义要求：{instruction}")
+    sections.append("请直接输出改写后的正文。")
+    return "\n\n".join(sections)
+
+
+def rewrite_note(
+    text: str,
+    mode: str = "polish",
+    instruction: str = "",
+    scope: str = "note",
+    title: str = "",
+    provider=None,
+) -> dict:
+    """Rewrite a note (or an inline selection) without inventing new facts."""
+    text = str(text or "").strip()
+    if not text:
+        raise ReaderError("没有可以处理的文字", 400)
+    if len(text) > NOTE_AI_MAX_CHARS:
+        raise ReaderError(f"笔记内容太长了（最多 {NOTE_AI_MAX_CHARS} 字）", 400)
+
+    mode = str(mode or "polish").strip().lower()
+    if mode not in NOTE_AI_MODES:
+        raise ReaderError("不支持的 AI 操作", 400)
+
+    scope = str(scope or "note").strip().lower()
+    if scope not in _NOTE_AI_SCOPE_RULES:
+        scope = "note"
+
+    instruction = str(instruction or "").strip()
+    if mode == "custom" and not instruction:
+        raise ReaderError("请填写自定义要求", 400)
+    # Extra instructions are truncated, not rejected, so a paste never fails.
+    instruction = instruction[:NOTE_AI_MAX_INSTRUCTION]
+    title = str(title or "").strip()[:200]
+
+    prompt = build_note_prompt(text, mode, instruction, scope, title)
+    cfg = _normalize_provider(provider)
+    started = time.time()
+    result = _invoke(prompt, cfg)
+    elapsed = round(time.time() - started, 1)
+    return {
+        "result": str(result["text"]).strip(),
+        "mode": mode,
         "provider": str(result["provider"]),
         "model": str(result["model"]),
         "elapsed": elapsed,

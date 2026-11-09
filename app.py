@@ -47,10 +47,13 @@ from core.languages import LANGUAGES  # noqa: E402
 
 WEB_DIR = BASE_DIR / "web"
 
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 # The reader checks these before trusting the server with the newer annotation
 # types; a stale process keeps an old API alive and silently drops them.
-API_FEATURES = ("text", "ink", "styles", "fonts", "margin-notes", "toc", "ai-reader", "notes")
+API_FEATURES = (
+    "text", "ink", "styles", "fonts", "margin-notes", "toc", "ai-reader", "notes",
+    "notes-ai",
+)
 
 
 def _build_id() -> int:
@@ -999,8 +1002,20 @@ def reader_ask():
     provider = payload.get("provider")
     if not isinstance(provider, (dict, str)):
         provider = None
+    images = payload.get("images")
     try:
-        result = ai_reader.answer(str(target), question, quote, history, provider)
+        if images:
+            result = ai_reader.answer(
+                str(target),
+                question,
+                quote,
+                history,
+                provider,
+                images=ai_reader.parse_image_payloads(images),
+            )
+        else:
+            # No images: exactly the pre-image call chain (5 positional args).
+            result = ai_reader.answer(str(target), question, quote, history, provider)
     except ai_reader.ReaderError as exc:
         return _error(str(exc), exc.status)
     except Exception as exc:
@@ -1194,6 +1209,29 @@ def notes_delete_category(category_id: str):
     except LookupError as exc:
         return _error(str(exc), 404)
     return _json({"categories": notes.list_categories()})
+
+
+@app.post("/api/notes/ai/polish")
+def notes_ai_polish():
+    """Rewrite a note (or an inline selection) with the configured AI provider."""
+    payload = _notes_payload()
+    provider = payload.get("provider")
+    if not isinstance(provider, (dict, str)):
+        provider = None
+    try:
+        result = ai_reader.rewrite_note(
+            text=payload.get("text") or "",
+            mode=payload.get("mode") or "polish",
+            instruction=payload.get("instruction") or "",
+            scope=payload.get("scope") or "note",
+            title=payload.get("title") or "",
+            provider=provider,
+        )
+    except ai_reader.ReaderError as exc:
+        return _error(str(exc), exc.status)
+    except Exception as exc:
+        return _error(f"AI 帮写失败：{exc}", 500)
+    return _json(result)
 
 
 # --------------------------------------------------------------------------- #

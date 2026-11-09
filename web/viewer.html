@@ -193,10 +193,26 @@
     </div>
     <div class="r-ai-suggest" id="ai-suggest"></div>
     <form class="r-ai-compose" id="ai-form">
-      <textarea id="ai-input" rows="2" placeholder="选中原文后提问，或直接输入问题…" spellcheck="false"></textarea>
-      <div class="r-ai-compose-foot">
-        <button type="button" class="r-ai-model" id="ai-model-btn" title="选择模型">模型：自动</button>
-        <button type="submit" class="r-ai-send" id="ai-send">发送</button>
+      <div class="r-ai-box" data-ai-box>
+        <div class="r-ai-attach-list" id="ai-attachments" hidden></div>
+        <textarea id="ai-input" rows="1" placeholder="向 AI 提问，或上传图片…" spellcheck="false"></textarea>
+        <div class="r-ai-compose-foot">
+          <button type="button" class="r-ai-attach" id="ai-attach" title="上传图片（也可以拖拽或粘贴）" aria-label="上传图片">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+          </button>
+          <input type="file" id="ai-image-file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+          <button type="button" class="r-ai-model" id="ai-model-btn" title="选择模型">模型：自动</button>
+          <span class="r-ai-compose-spacer"></span>
+          <span class="r-ai-compose-hint" id="ai-compose-hint">Enter 发送 · Shift+Enter 换行</span>
+          <button type="submit" class="r-ai-send" id="ai-send" title="发送" aria-label="发送">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+                 stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/>
+            </svg>
+          </button>
+        </div>
       </div>
     </form>
     <div class="r-ai-settings" id="ai-settings" hidden></div>

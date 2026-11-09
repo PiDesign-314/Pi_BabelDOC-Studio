@@ -16,6 +16,17 @@
   const HISTORY_LIMIT = 40;
   const REQUEST_TIMEOUT = 240000;
   const SETTINGS_TIMEOUT = 20000;
+  const MAX_IMAGES = 4;
+  const MAX_IMAGE_FILE = 8 * 1024 * 1024;      // 原始文件，发送前会先缩放
+  const MAX_IMAGE_DIM = 1600;                  // 长边最大像素
+  const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+  const SEND_ICON =
+    '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
+    'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>';
+  const STOP_ICON =
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">' +
+    '<rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>';
   const SUGGESTIONS = [
     "这个结论有实验支撑吗？",
     "解释这段",
@@ -54,6 +65,10 @@
     messages: [],
     settings: { provider: "auto", model: "", base_url: "", preset: "moonshot", api_key_set: false },
     status: null,
+    images: [],
+    imageBusy: false,
+    abort: null,
+    cancelled: false,
     closeTimer: 0,
     refitFrame: 0,
     statusNote: "",
@@ -167,16 +182,22 @@
     els.input = $("#ai-input");
     els.send = $("#ai-send");
     els.modelBtn = $("#ai-model-btn");
+    els.attachBtn = $("#ai-attach");
+    els.attachList = $("#ai-attachments");
+    els.imageFile = $("#ai-image-file");
+    els.composeHint = $("#ai-compose-hint");
     els.settings = $("#ai-settings");
 
     installChrome();
     installResize();
+    installComposer();
     bindEvents();
     updateProviderUI();
     renderSuggest();
     loadHistory();
     renderThread();
     renderQuote();
+    refreshSendState();
 
     whenReady().then(() => {
       state.ready = true;
@@ -232,9 +253,208 @@
     }
   }
 
+  /* ------------------------------------------------------------ composer -- */
+  const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+
+  function imageCountLabel(count) {
+    return count === 1 ? "1 张图片" : `${count} 张图片`;
+  }
+
+  function refreshSendState() {
+    if (!els.send) return;
+    if (state.busy) {
+      els.send.disabled = false;
+      els.send.classList.add("is-stop");
+      els.send.innerHTML = STOP_ICON;
+      els.send.title = "停止生成";
+      els.send.setAttribute("aria-label", "停止生成");
+      return;
+    }
+    els.send.classList.remove("is-stop");
+    els.send.innerHTML = SEND_ICON;
+    els.send.title = "发送";
+    els.send.setAttribute("aria-label", "发送");
+    const hasText = Boolean(els.input && els.input.value.trim());
+    els.send.disabled = !hasText && state.images.length === 0;
+  }
+
+  function resizeInput() {
+    if (!els.input) return;
+    els.input.style.height = "auto";
+    const max = 132;
+    els.input.style.height = `${Math.min(max, Math.max(24, els.input.scrollHeight))}px`;
+    els.input.style.overflowY = els.input.scrollHeight > max ? "auto" : "hidden";
+  }
+
+  function renderAttachments() {
+    if (!els.attachList) return;
+    els.attachList.textContent = "";
+    els.attachList.hidden = state.images.length === 0;
+    for (const image of state.images) {
+      const box = document.createElement("div");
+      box.className = "r-ai-attach-item";
+      const img = document.createElement("img");
+      img.src = image.dataUrl;
+      img.alt = image.name;
+      img.draggable = false;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "r-ai-attach-x";
+      remove.title = "移除图片";
+      remove.setAttribute("aria-label", `移除图片 ${image.name}`);
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        state.images = state.images.filter((item) => item.id !== image.id);
+        renderAttachments();
+        refreshSendState();
+        if (els.input) els.input.focus();
+      });
+      box.append(img, remove);
+      els.attachList.append(box);
+    }
+  }
+
+  /* 图片先在浏览器里缩放到最长边 1600px，再转成 data URL 发给后端；
+     PNG 截图保持清晰，体积过大时才退到 JPEG。 */
+  function loadImageFile(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const longest = Math.max(img.naturalWidth || 1, img.naturalHeight || 1);
+          const scale = Math.min(1, MAX_IMAGE_DIM / longest);
+          const width = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+          const height = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("canvas");
+          context.drawImage(img, 0, 0, width, height);
+          let dataUrl = canvas.toDataURL("image/png");
+          if (dataUrl.length > 2_400_000) dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+          resolve({
+            id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            name: file.name || "image",
+            dataUrl,
+            width,
+            height,
+          });
+        } catch (error) {
+          reject(error);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("图片读取失败"));
+      };
+      img.src = url;
+    });
+  }
+
+  async function addImageFiles(files) {
+    const list = Array.from(files || []).filter((file) => file && file.type && file.type.startsWith("image/"));
+    if (!list.length || state.imageBusy) return;
+    state.imageBusy = true;
+    try {
+      for (const file of list) {
+        if (state.images.length >= MAX_IMAGES) {
+          toast(`最多添加 ${MAX_IMAGES} 张图片`, "bad");
+          break;
+        }
+        if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+          toast("只支持 PNG / JPG / WebP / GIF 图片", "bad");
+          continue;
+        }
+        if (file.size > MAX_IMAGE_FILE) {
+          toast(`图片「${file.name || "未命名"}」太大了（最多 8 MB）`, "bad");
+          continue;
+        }
+        try {
+          const image = await loadImageFile(file);
+          state.images.push(image);
+          renderAttachments();
+        } catch {
+          toast("图片读取失败，换一张试试", "bad");
+        }
+      }
+      refreshSendState();
+    } finally {
+      state.imageBusy = false;
+    }
+  }
+
+  function clearImages() {
+    state.images = [];
+    renderAttachments();
+    refreshSendState();
+  }
+
+  function imagePayload() {
+    return state.images.map((image) => ({ data_url: image.dataUrl, name: image.name }));
+  }
+
+  function installComposer() {
+    if (els.attachBtn && els.imageFile) {
+      els.attachBtn.addEventListener("click", () => {
+        if (state.imageBusy) return;
+        els.imageFile.click();
+      });
+      els.imageFile.addEventListener("change", () => {
+        const files = els.imageFile.files ? Array.from(els.imageFile.files) : [];
+        els.imageFile.value = "";
+        void addImageFiles(files);
+      });
+    }
+    if (els.input) {
+      els.input.addEventListener("input", () => {
+        resizeInput();
+        refreshSendState();
+      });
+      els.input.addEventListener("paste", (event) => {
+        const data = event.clipboardData;
+        if (!data) return;
+        const files = [];
+        for (const item of Array.from(data.items || [])) {
+          if (item.kind === "file" && item.type && item.type.startsWith("image/")) {
+            const file = item.getAsFile();
+            if (file) files.push(file);
+          }
+        }
+        if (files.length) {
+          event.preventDefault();
+          void addImageFiles(files);
+        }
+      });
+    }
+    if (els.form) {
+      els.form.addEventListener("dragover", (event) => {
+        if (!event.dataTransfer) return;
+        event.preventDefault();
+        els.form.classList.add("dragging");
+      });
+      els.form.addEventListener("dragleave", (event) => {
+        if (event.target === els.form || !els.form.contains(event.relatedTarget)) {
+          els.form.classList.remove("dragging");
+        }
+      });
+      els.form.addEventListener("drop", (event) => {
+        if (!event.dataTransfer) return;
+        const files = Array.from(event.dataTransfer.files || []);
+        els.form.classList.remove("dragging");
+        if (!files.length) return;
+        event.preventDefault();
+        void addImageFiles(files);
+      });
+    }
+    resizeInput();
+  }
+
   function bindEvents() {
-    if (els.toggle) els.toggle.addEventListener("click", () => (state.open ? closeDrawer() : openDrawer()));
-    if (els.close) els.close.addEventListener("click", closeDrawer);
+    if (els.toggle) els.toggle.addEventListener("click", () => (state.open ? closeDrawer() : openDrawer()));    if (els.close) els.close.addEventListener("click", closeDrawer);
     if (els.settingsBtn) els.settingsBtn.addEventListener("click", () => {
       if (state.settingsOpen) closeSettings();
       else openSettings();
@@ -248,6 +468,10 @@
     if (els.form) {
       els.form.addEventListener("submit", (event) => {
         event.preventDefault();
+        if (state.busy) {
+          cancelRequest();
+          return;
+        }
         send(null);
       });
     }
@@ -360,6 +584,8 @@
     state.open = true;
     if (els.toggle) els.toggle.setAttribute("aria-pressed", "true");
     if (wasHidden) {
+      resizeInput();
+      refreshSendState();
       renderThread();
       renderQuote();
       /* A prefilled question (e.g. 「解释这段」) means the user is about to
@@ -595,12 +821,12 @@
 
   function messageNode(message) {
     if (message.role === "user") {
-      return userMessageNode(message.content, message.quote);
+      return userMessageNode(message.content, message.quote, message.imageCount);
     }
     return assistantNode(message);
   }
 
-  function userMessageNode(text, quote) {
+  function userMessageNode(text, quote, imageCount) {
     const node = document.createElement("div");
     node.className = "r-ai-msg user";
     if (quote && (quote.text || quote.page)) {
@@ -622,6 +848,12 @@
     content.className = "r-ai-msg-text";
     content.textContent = String(text || "");
     node.append(content);
+    if (imageCount) {
+      const badge = document.createElement("div");
+      badge.className = "r-ai-msg-images";
+      badge.textContent = `附 ${imageCountLabel(Number(imageCount) || 0)}`;
+      node.append(badge);
+    }
     return node;
   }
 
@@ -632,7 +864,6 @@
 
   function metaLine(message) {
     const bits = [];
-    if (message.provider) bits.push(providerLabel(message.provider));
     if (message.model) bits.push(String(message.model));
     if (message.elapsed) {
       const seconds = Number(message.elapsed);
@@ -686,6 +917,28 @@
     const node = document.createElement("div");
     node.className = "r-ai-msg assistant";
     node.__citations = normalizeCitations(message.citations);
+    /* 轻量身份标识：让「AI 回复」在长对话里一眼可辨，但不抢正文注意力。 */
+    const who = document.createElement("div");
+    who.className = "r-ai-who";
+    const ico = document.createElement("span");
+    ico.className = "r-ai-who-ico";
+    ico.setAttribute("aria-hidden", "true");
+    ico.textContent = "✦";
+    const name = document.createElement("span");
+    name.className = "r-ai-who-name";
+    name.textContent = "AI 助读";
+    who.append(ico, name);
+    const provider = providerLabel(message.provider);
+    if (provider) {
+      const sep = document.createElement("span");
+      sep.className = "r-ai-who-sep";
+      sep.textContent = "·";
+      const label = document.createElement("span");
+      label.className = "r-ai-who-model";
+      label.textContent = provider;
+      who.append(sep, label);
+    }
+    node.append(who);
     const body = document.createElement("div");
     body.className = "r-ai-md";
     body.innerHTML = renderMarkdown(message.content || "（模型没有返回内容）");
@@ -735,26 +988,39 @@
     return list;
   }
 
-  function appendUser(text, quote) {
+  function appendUser(text, quote, imageCount) {
     if (!els.messages) return null;
     removeEmptyState();
-    const node = userMessageNode(text, quote);
+    const node = userMessageNode(text, quote, imageCount);
     els.messages.append(node);
     scrollBottom();
     return node;
   }
 
-  function appendPending(quote) {
+  function appendPending(quote, imageCount) {
     if (!els.messages) return null;
     removeEmptyState();
     const node = document.createElement("div");
     node.className = "r-ai-msg pending";
+    const label = imageCount
+      ? (quote && quote.text ? "正在结合所引原文与图片…" : "正在结合图片读论文…")
+      : (quote && quote.text ? "正在结合所引原文…" : "正在读论文…");
     node.innerHTML =
       '<span class="r-ai-dots" aria-hidden="true"><i></i><i></i><i></i></span>' +
-      `<span class="r-ai-pending-label">${quote && quote.text ? "正在结合所引原文…" : "正在读论文…"}</span>`;
+      `<span class="r-ai-pending-label">${label}</span>`;
     els.messages.append(node);
     scrollBottom();
     return node;
+  }
+
+  function appendStopped() {
+    if (!els.messages) return;
+    removeEmptyState();
+    const node = document.createElement("div");
+    node.className = "r-ai-msg stopped";
+    node.textContent = "已停止生成";
+    els.messages.append(node);
+    scrollBottom();
   }
 
   function appendAssistant(message) {
@@ -859,6 +1125,8 @@
 
   async function request(url, body, timeoutMs) {
     const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const tracked = url === "/api/reader/ask";
+    if (tracked && controller) state.abort = controller;
     const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs || 30000) : 0;
     try {
       const response = await fetch(url, {
@@ -889,22 +1157,35 @@
           : `无法连接应用后端（${(error && error.message) || "网络错误"}）`,
       };
     } finally {
+      if (tracked && state.abort === controller) state.abort = null;
       if (timer) window.clearTimeout(timer);
     }
   }
 
   function setComposing(active) {
     state.busy = active;
-    if (els.send) els.send.disabled = active;
     if (els.input) els.input.setAttribute("aria-busy", active ? "true" : "false");
     if (els.drawer) els.drawer.classList.toggle("busy", active);
+    /* 生成中把发送按钮换成停止按钮：用户能中断一次跑偏的回答。 */
+    refreshSendState();
+  }
+
+  function cancelRequest() {
+    if (!state.busy) return;
+    state.cancelled = true;
+    if (state.abort) {
+      try { state.abort.abort(); } catch { /* ignore */ }
+    }
   }
 
   async function send(question, options = {}) {
     if (!els.input || state.busy) return;
     const text = String(question == null ? els.input.value : question).trim();
+    const fromComposer = question == null;
+    const fromState = !Array.isArray(options.images);
+    const pendingImages = fromState ? imagePayload() : options.images;
     if (!text) {
-      toast("先写一个问题再发送", "bad");
+      toast(pendingImages.length ? "配一句话再发送" : "先写一个问题再发送", "bad");
       els.input.focus();
       return;
     }
@@ -915,34 +1196,46 @@
       ? { text: String(quote.text || ""), page: Number(quote.page) || 0 }
       : null;
     const prior = state.messages.slice();
-    const fromComposer = question == null;
 
     if (!options.silent) {
-      appendUser(text, quotePayload);
+      appendUser(text, quotePayload, pendingImages.length);
     }
-    if (fromComposer && !options.silent) els.input.value = "";
+    if (fromComposer && !options.silent) {
+      els.input.value = "";
+      resizeInput();
+    }
+    if (fromState && !options.silent) clearImages();
+    state.cancelled = false;
     renderSuggest(true);
     setComposing(true);
-    const pending = appendPending(quotePayload);
+    const pending = appendPending(quotePayload, pendingImages.length);
 
-    const result = await request(
-      "/api/reader/ask",
-      {
-        path: docPath(),
-        question: text,
-        quote: quotePayload,
-        history: historyForRequest(prior),
-        provider: providerPayload(),
-      },
-      REQUEST_TIMEOUT
-    );
+    const body = {
+      path: docPath(),
+      question: text,
+      quote: quotePayload,
+      history: historyForRequest(prior),
+      provider: providerPayload(),
+    };
+    if (pendingImages.length) body.images = pendingImages;
+
+    const result = await request("/api/reader/ask", body, REQUEST_TIMEOUT);
 
     if (pending) pending.remove();
+    if (state.cancelled) {
+      state.cancelled = false;
+      setComposing(false);
+      appendStopped();
+      renderSuggest();
+      return;
+    }
     setComposing(false);
 
     if (!result.ok) {
       renderSuggest();
-      appendError(result.error, result.status, () => send(text, { quote: quotePayload, silent: true }));
+      appendError(result.error, result.status, () =>
+        send(text, { quote: quotePayload, silent: true, images: pendingImages })
+      );
       return;
     }
 
@@ -966,6 +1259,7 @@
           page: Number(quotePayload.page) || 0,
         };
       }
+      if (pendingImages.length) entry.imageCount = pendingImages.length;
       state.messages.push(entry);
     }
     state.messages.push(assistant);
@@ -1514,6 +1808,8 @@
       if (els.input) els.input.value = "";
       renderSuggest();
     }
+    resizeInput();
+    refreshSendState();
     focusInputSoon();
   }
 
