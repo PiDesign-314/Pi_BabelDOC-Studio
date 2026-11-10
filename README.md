@@ -4,7 +4,7 @@
 
 <h1>ReadPI</h1>
 
-<p><strong>把 PDF 论文翻成双语，保留公式、图表和原始排版；翻译、AI 助读、笔记与批注在同一个本地窗口完成。</strong></p>
+<p><strong>把 PDF 翻译，保留公式、图表和原始排版；Zotero文献库互联、AI 助读、笔记与批注在同一个本地窗口完成。</strong></p>
 
 <p>
   <a href="https://github.com/PiDesign-314/ReadPI/releases/latest">
