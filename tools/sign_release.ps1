@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     审计或签名 Windows 免安装包里的全部 PE 文件（exe / dll / pyd）。
 
@@ -155,7 +155,7 @@ function Write-SigningStatus {
         '',
         'Windows 11「智能应用控制」(SAC) 在开启状态下会拦截未签名的 exe/dll/pyd。',
         '如果启动时看到「智能应用控制已阻止可能不安全的文件/应用」，请先阅读包内 README.md，',
-        '或 docs/SMART-APP-CONTROL.md（https://github.com/PiDesign-314/Pi_BabelDOC-Studio/blob/main/docs/SMART-APP-CONTROL.md）。'
+        '或 docs/SMART-APP-CONTROL.md（https://github.com/PiDesign-314/ReadPI/blob/main/docs/SMART-APP-CONTROL.md）。'
     )
     $statusPath = Join-Path $Root 'SIGNING-STATUS.txt'
     $lines | Out-File -FilePath $statusPath -Encoding utf8

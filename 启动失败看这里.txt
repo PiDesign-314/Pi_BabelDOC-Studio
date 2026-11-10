@@ -43,7 +43,7 @@ BabelDOC Studio 启动失败？先看这里
 · 不要下载 GitHub 自动生成的 Source code ZIP，那里面没有运行时，无法直接启动。
 
 详细说明（含原因、检查方法和签名进度）：
-https://github.com/PiDesign-314/Pi_BabelDOC-Studio/blob/main/docs/SMART-APP-CONTROL.md
+https://github.com/PiDesign-314/ReadPI/blob/main/docs/SMART-APP-CONTROL.md
 
 检查本机是否开着智能应用控制：
 设置 → 隐私和安全性 → Windows 安全中心 → 应用和浏览器控制 → 智能应用控制

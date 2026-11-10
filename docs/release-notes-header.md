@@ -10,7 +10,7 @@
 >   只能在「设置 → 隐私和安全性 → Windows 安全中心 → 应用和浏览器控制 → 智能应用控制」里关闭它，
 >   或等待签名版。
 >
-> 完整排查步骤与签名进度：<https://github.com/PiDesign-314/Pi_BabelDOC-Studio/blob/main/docs/SMART-APP-CONTROL.md>
+> 完整排查步骤与签名进度：<https://github.com/PiDesign-314/ReadPI/blob/main/docs/SMART-APP-CONTROL.md>
 
 > [!NOTE]
 > **启动方式：未签名版请双击 `Start.bat`。** 包内也提供 `BabelDOC Studio.exe`，它和 `Start.bat`

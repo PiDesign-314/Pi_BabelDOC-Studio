@@ -22,7 +22,7 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("BabelDOC Studio 启动器")]
 [assembly: AssemblyProduct("BabelDOC Studio")]
 [assembly: AssemblyCompany("PiDesign-314")]
-[assembly: AssemblyCopyright("https://github.com/PiDesign-314/Pi_BabelDOC-Studio")]
+[assembly: AssemblyCopyright("https://github.com/PiDesign-314/ReadPI")]
 [assembly: AssemblyVersion("1.0.1.0")]
 [assembly: AssemblyFileVersion("1.0.1.0")]
 

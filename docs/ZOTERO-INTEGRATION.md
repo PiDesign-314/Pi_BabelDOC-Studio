@@ -23,7 +23,7 @@ Zotero 10 的文件夹读取使用 `Zotero.Collections.getByLibrary(libraryID, t
 前置条件：Zotero 7–10；ReadPI **1.8.1 或更新版本**。
 先启动一次新版应用，它会写出插件需要的
 `launch-info.json`，这样即使应用没开着也能被插件自动拉起。
-请从 [v1.8.1 发布页](https://github.com/PiDesign-314/Pi_BabelDOC-Studio/releases/tag/v1.8.1)
+请从 [v1.8.1 发布页](https://github.com/PiDesign-314/ReadPI/releases/tag/v1.8.1)
 下载新版 Windows 免安装包；关闭旧版进程后再启动新版，避免插件误连到旧服务。
 
 1. 打开 ReadPI →「翻译设置」→ 拉到最底部「Zotero 集成」；
