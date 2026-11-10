@@ -32,6 +32,8 @@
   --accent-ring: rgba(255, 55, 95, 0.16);
   --green: #30b158;
   --green-soft: rgba(48, 177, 88, 0.12);
+  --warn: #a34f00;
+  --warn-soft: rgba(255, 159, 10, 0.14);
   --blue: #0a84ff;
 
   /* --- fills, radii, elevation ----------------------------------- */
@@ -87,6 +89,8 @@
     --accent-ring: rgba(255, 77, 109, 0.24);
     --green: #34c759;
     --green-soft: rgba(52, 199, 89, 0.18);
+    --warn: #ffb340;
+    --warn-soft: rgba(255, 159, 10, 0.18);
     --fill-1: rgba(118, 118, 128, 0.24);
     --fill-2: rgba(118, 118, 128, 0.3);
     --fill-3: rgba(118, 118, 128, 0.38);
@@ -116,6 +120,8 @@
   --accent-ring: rgba(255, 77, 109, 0.24);
   --green: #34c759;
   --green-soft: rgba(52, 199, 89, 0.18);
+  --warn: #ffb340;
+  --warn-soft: rgba(255, 159, 10, 0.18);
   --fill-1: rgba(118, 118, 128, 0.24);
   --fill-2: rgba(118, 118, 128, 0.3);
   --fill-3: rgba(118, 118, 128, 0.38);
@@ -127,7 +133,73 @@
   --paper-color: #ffffff;
 }
 
-:root[data-theme="light"] { color-scheme: light; }
+/* Explicit in-app light must beat the OS dark preference: the media query
+   above defines dark tokens on `:root`, so a light choice needs the same
+   complete token set — color-scheme alone only changed native widgets. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* --- surfaces --------------------------------------------------- */
+  --bg: #f2f2f7;
+  --bg-elevated: rgba(250, 250, 252, 0.78);
+  --card: #ffffff;
+  --card-soft: #fbfbfd;
+
+  /* --- labels ----------------------------------------------------- */
+  --text: #1d1d1f;
+  --text-2: #5b5b60;
+  --text-3: #6e6e73;
+
+  /* --- separators ------------------------------------------------- */
+  --line: #e6e6eb;
+  --line-strong: #d6d6dc;
+
+  /* --- tint ------------------------------------------------------- */
+  --accent: #ff375f;
+  --accent-hover: #ef2d55;
+  --accent-soft: rgba(255, 55, 95, 0.1);
+  --accent-ring: rgba(255, 55, 95, 0.16);
+  --green: #30b158;
+  --green-soft: rgba(48, 177, 88, 0.12);
+  --warn: #a34f00;
+  --warn-soft: rgba(255, 159, 10, 0.14);
+  --blue: #0a84ff;
+
+  /* --- fills, radii, elevation ----------------------------------- */
+  --fill-1: rgba(120, 120, 128, 0.12);
+  --fill-2: rgba(120, 120, 128, 0.2);
+  --fill-3: rgba(118, 118, 128, 0.24);
+  --switch-off: #e9e9ea;
+  --radius-xl: 24px;
+  --radius-lg: 18px;
+  --radius-md: 13px;
+  --radius-group: 14px;
+  --radius-control: 10px;
+  --radius-sm: 8px;
+  --shadow-card: 0 1px 2px rgba(17, 17, 26, 0.03), 0 10px 30px -22px rgba(17, 17, 26, 0.28);
+  --shadow-pop: 0 24px 70px rgba(17, 17, 26, 0.22);
+  --shadow-sheet: 0 24px 60px -12px rgba(17, 17, 26, 0.32);
+  --drop-glow: rgba(255, 255, 255, 0.55);
+  --paper-color: #ffffff;
+
+  /* --- type ------------------------------------------------------- */
+  --font: -apple-system, "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text",
+    "PingFang SC", "Microsoft YaHei UI", sans-serif;
+  --font-display: -apple-system, "SF Pro Display", "SF Pro Text", "Segoe UI Variable Display",
+    "Segoe UI Variable Text", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+  --mono: "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+
+  /* --- layout & motion ------------------------------------------- */
+  --content-max: 760px;
+  --topbar-h: 52px;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-1: 0.18s;
+  --dur-2: 0.24s;
+
+  /* --- legacy variables kept for compatibility (no visual impact) -- */
+  --hero-angle: 0deg;
+}
 
 /* ==================================================================== *
  *  Base
@@ -999,13 +1071,18 @@ input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
 
 .drop-zone .btn { flex: none; }
 
-.file-list { display: grid; min-width: 0; }
+/* The list is a single fixed-width track: without minmax(0, 1fr) the implicit
+   auto track sizes to the nowrap .file-name max-content width and pushes the
+   trailing ✕ outside the rounded card. */
+.file-list { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 
 .file-row {
   position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
   min-height: 56px;
   padding: 8px 16px;
   animation: row-in 0.28s var(--ease-out) backwards;
@@ -1230,6 +1307,9 @@ input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
   padding: 0 2px;
 }
 
+.job-library-link { margin-left: auto; color: var(--accent); font-size: 12.5px; font-weight: 600; text-decoration: none; }
+.job-library-link:hover { text-decoration: underline; }
+
 .job-stage {
   display: inline-flex;
   align-items: center;
@@ -1288,15 +1368,24 @@ input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
 /* ==================================================================== *
  *  Home — result list
  * ==================================================================== */
-.result-list { display: grid; min-width: 0; }
+.result-list { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 
 .result-item {
   position: relative;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
   min-height: 52px;
   padding: 10px 16px;
+}
+
+/* Row content on one line; the blank-output advisory sits underneath. */
+.result-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .result-item + .result-item::before {
@@ -1332,6 +1421,51 @@ input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
 .result-size { flex: none; font-size: 12.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 .result-item .btn { height: 30px; padding: 0 11px; font-size: 12.5px; border-radius: var(--radius-sm); }
+
+/* Blank-output QA advisory: calm, non-blocking, under the affected result. */
+.result-advisory {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: var(--warn-soft);
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.result-advisory-tag {
+  flex: none;
+  height: 19px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 19px;
+}
+
+.result-advisory-text { min-width: 0; }
+
+.result-advisory-retry {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--warn);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.result-advisory-retry:hover { text-decoration: underline; }
+.result-advisory-retry:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; border-radius: 4px; }
 
 .row-link {
   display: block;
@@ -2082,6 +2216,11 @@ body.settings-open { overflow: hidden; }
   border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--card) 92%, transparent);
 }
+/* Zotero add-on block inside the settings sheet: one row + install hint. */
+.zotero-help {
+  margin: 10px 0 0;
+  line-height: 1.6;
+}
 @media (max-width: 640px) {
   .settings-sheet { padding: 10px; }
   .settings-panel { max-height: 92vh; border-radius: 16px; }
@@ -2151,6 +2290,16 @@ body.settings-open { overflow: hidden; }
   padding-right: 10px;
   border-color: transparent;
 }
+/* Keep select and model input on the same 32px rhythm: the base form rules
+   are more specific and would otherwise force the input to 40px. */
+.summary-controls .summary-select,
+.summary-controls .summary-input {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.summary-controls .summary-select { padding-right: 30px; }
 .summary-select:hover,
 .summary-input:hover { border-color: var(--line-strong); background-color: var(--card); }
 .summary-select:focus,
@@ -2159,7 +2308,260 @@ body.settings-open { overflow: hidden; }
 .summary-input:disabled { opacity: 0.72; cursor: default; }
 .summary-arrow { color: var(--text-3); font-size: 12px; flex: none; }
 .summary-glossary { max-width: min(280px, 52vw); }
+
+/* API Key state pill: the key value itself is never shown here. */
+.summary-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background-color: var(--card-soft);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-standard),
+    border-color var(--dur-1) var(--ease-standard);
+}
+.summary-key:hover { border-color: var(--line-strong); background-color: var(--card); }
+.summary-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.summary-key-label { color: var(--text-3); font-weight: 500; }
+.summary-key-state[data-state="empty"] { color: var(--accent); }
+.summary-key-state[data-state="warn"] { color: var(--warn); }
+.summary-key-state[data-state="saved"] { color: var(--green); }
+
 @media (max-width: 720px) {
   .summary-row { align-items: flex-start; flex-direction: column; gap: 6px; }
   .summary-controls { width: 100%; justify-content: flex-start; }
+}
+@media (max-width: 560px) {
+  .summary-controls { flex-wrap: wrap; }
+  #quick-provider,
+  .summary-controls .combo { flex: 1 1 100%; max-width: 100%; }
+}
+
+/* ==================================================================== *
+ *  Round-2 home affordances: settings entry, model combobox, help tips
+ * ==================================================================== */
+
+/* --- translation-settings entry in the toolbar ---------------------- */
+.topbar-settings { flex: none; }
+.pill-btn-label { white-space: nowrap; }
+.topbar-settings[aria-expanded="true"] { background: var(--fill-1); color: var(--text); }
+
+/* Entry stage: the hero footnote doubles as a settings shortcut. */
+.foot-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.foot-link:hover { color: var(--accent-hover); }
+.foot-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+/* --- model combobox -------------------------------------------------- */
+.combo {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.combo > input { width: 100%; padding-right: 32px; }
+
+.combo-toggle {
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.combo-toggle:hover { color: var(--text); background: var(--fill-1); }
+.combo-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.combo-toggle:disabled { opacity: 0.4; cursor: default; background: transparent; }
+.combo-toggle svg { transition: transform var(--dur-1) var(--ease-standard); }
+.combo-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+/* The menu is a body-level layer: the summary card clips its children and
+   the settings sheet scrolls, so a fixed menu keeps clear of both. */
+.combo-menu {
+  position: fixed;
+  z-index: 96;
+  max-height: 264px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow-pop);
+  animation: settings-fade 0.12s ease;
+}
+.combo-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.combo-option:hover,
+.combo-option.is-active { background: var(--fill-1); }
+.combo-option.is-selected { color: var(--accent); font-weight: 600; }
+.combo-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.combo-option-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo-check { flex: none; font-size: 11px; }
+.combo-empty,
+.combo-note {
+  margin: 0;
+  padding: 7px 9px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+.combo-note { margin-top: 3px; border-top: 1px solid var(--line); }
+
+/* Summary row sizing (the wrapper replaces the old bare input). */
+.summary-controls .combo {
+  flex: 1 1 120px;
+  max-width: 200px;
+}
+.summary-controls .combo > .summary-input {
+  height: 32px;
+  min-height: 32px;
+  max-width: 100%;
+  padding: 0 30px 0 10px;
+  font-size: 13px;
+}
+.summary-controls .combo > .summary-input:hover {
+  border-color: var(--line-strong);
+  background-color: var(--card);
+}
+.summary-controls .combo > .summary-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  background-color: var(--card);
+}
+
+/* Settings sheet: keep the field on the 34px row rhythm. */
+.row .select-wrap > .combo { flex: 1 1 auto; width: 100%; }
+.row .select-wrap > .combo > input {
+  height: 34px;
+  min-height: 34px;
+  padding: 0 32px 0 12px;
+  font-size: 14px;
+}
+
+/* --- advanced-option help tooltips ---------------------------------- */
+.check-wrap { display: inline-flex; align-items: center; gap: 3px; }
+
+.help-dot {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fill-1);
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+.help-dot:hover { background: var(--accent-soft); color: var(--accent); }
+.help-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.help-tip {
+  position: fixed;
+  z-index: 96;
+  max-width: 280px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  box-shadow: var(--shadow-pop);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+  pointer-events: none;
+  animation: settings-fade 0.14s ease;
+}
+
+/* Screen-reader-only copy of each tooltip; also linked by aria-describedby. */
+.help-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Long-document suggestion under the advanced toggles. */
+.longdoc-hint {
+  margin: 2px 16px 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.longdoc-hint strong { color: var(--accent); font-weight: 600; }
+
+/* Compact toolbar: keep the settings entry reachable as an icon. */
+@media (max-width: 700px) {
+  .topbar-settings {
+    width: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+  .topbar-settings .pill-btn-label { display: none; }
+}
+
+/* Narrow toolbar: the brand block truncates instead of spilling under the
+   toolbar buttons, and secondary chrome makes room for the settings entry. */
+.brand-text h1 { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 520px) {
+  .topbar-github { display: none; }
+  #engine-pill { padding: 0 8px; }
+  #engine-text { display: none; }
 }

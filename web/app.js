@@ -1,4 +1,4 @@
-/* BabelDOC Studio front-end — vanilla JS, no build step. */
+/* ReadPI front-end — vanilla JS, no build step. */
 (() => {
   "use strict";
 
@@ -103,10 +103,23 @@
     quickProvider: $("#quick-provider"),
     quickModel: $("#quick-model"),
     quickModelOptions: $("#quick-model-options"),
+    quickModelToggle: $("#quick-model-toggle"),
+    quickModelMenu: $("#quick-model-menu"),
+    modelToggle: $("#model-toggle"),
+    modelMenu: $("#model-menu"),
     quickLangIn: $("#quick-lang-in"),
     quickLangOut: $("#quick-lang-out"),
     quickDual: $("#quick-dual"),
     quickGlossary: $("#quick-glossary"),
+    quickKey: $("#quick-key"),
+    quickKeyState: $("#quick-key-state"),
+    compatFirst: $("#compat-first"),
+    longDocHint: $("#longdoc-hint"),
+    helpTip: $("#help-tip"),
+    btnSettingsEntry: $("#btn-settings-entry"),
+    btnHeroSettings: $("#btn-hero-settings"),
+    zoteroStatus: $("#zotero-status"),
+    zoteroDownload: $("#zotero-download"),
   };
 
   /* ------------------------------------------------------------- theme -- */
@@ -202,6 +215,97 @@
     setTimeout(() => node.remove(), 1000);
   }
 
+  /* ----------------------------------------------------------- tooltips --
+   * One shared floating bubble for advanced-option explanations. The bubble
+   * lives on <body> so neither the settings card's overflow nor the sheet's
+   * scroll container can clip it; it is positioned in viewport coordinates
+   * and clamped to the visible area. */
+  const HELP_DELAY = 150;
+  let helpTimer = null;
+  let helpAnchor = null;
+
+  function placeHelpTip() {
+    if (!helpAnchor || !el.helpTip || el.helpTip.hidden) return;
+    const anchorRect = helpAnchor.getBoundingClientRect();
+    const tipRect = el.helpTip.getBoundingClientRect();
+    const margin = 8;
+    let top = anchorRect.top - tipRect.height - 8;
+    if (top < margin) {
+      const below = anchorRect.bottom + 8;
+      top =
+        below + tipRect.height <= window.innerHeight - margin
+          ? below
+          : Math.max(margin, window.innerHeight - tipRect.height - margin);
+    }
+    const centered = anchorRect.left + anchorRect.width / 2 - tipRect.width / 2;
+    const left = Math.max(margin, Math.min(centered, window.innerWidth - tipRect.width - margin));
+    el.helpTip.style.top = `${Math.round(top)}px`;
+    el.helpTip.style.left = `${Math.round(left)}px`;
+  }
+
+  function showHelpTip(anchor) {
+    if (!anchor || !el.helpTip) return;
+    const text = anchor.getAttribute("data-help");
+    if (!text) return;
+    clearTimeout(helpTimer);
+    helpTimer = null;
+    helpAnchor = anchor;
+    el.helpTip.textContent = text;
+    el.helpTip.hidden = false;
+    placeHelpTip();
+  }
+
+  function hideHelpTip() {
+    clearTimeout(helpTimer);
+    helpTimer = null;
+    helpAnchor = null;
+    if (el.helpTip) el.helpTip.hidden = true;
+  }
+
+  function scheduleHelpTip(anchor) {
+    clearTimeout(helpTimer);
+    helpTimer = setTimeout(() => showHelpTip(anchor), HELP_DELAY);
+  }
+
+  function bindHelpTips() {
+    $$("[data-help]").forEach((anchor) => {
+      anchor.addEventListener("pointerenter", (event) => {
+        if (event.pointerType === "touch") return;
+        scheduleHelpTip(anchor);
+      });
+      anchor.addEventListener("pointerleave", (event) => {
+        if (event.pointerType === "touch") return;
+        hideHelpTip();
+      });
+      /* focusin/focusout bubble from the checkbox and the ? button. */
+      anchor.addEventListener("focusin", () => scheduleHelpTip(anchor));
+      anchor.addEventListener("focusout", () => hideHelpTip());
+    });
+    /* Touch / click affordance for the ? button (also stops the label from
+       toggling its checkbox when the fact was asked for). */
+    $$(".help-dot").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const anchor = button.closest("[data-help]");
+        if (!el.helpTip.hidden && helpAnchor === anchor) hideHelpTip();
+        else showHelpTip(anchor);
+      });
+    });
+    window.addEventListener("scroll", placeHelpTip, true);
+    window.addEventListener("resize", placeHelpTip);
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape" && el.helpTip && !el.helpTip.hidden) {
+          hideHelpTip();
+          event.stopPropagation();
+        }
+      },
+      true
+    );
+  }
+
   /* ------------------------------------------------------------- stages --
    * "entry"  — nothing uploaded yet, only the single drop target is shown.
    * "work"   — files present, the settings/action/results cards fade in.
@@ -209,9 +313,10 @@
   const STAGE_OUT_MS = 190;
   const ENTRANCE_MS = 1100;
   let entranceTimer = null;
+  let firstRunFocusTimer = null;
 
   function showStage(next, options = {}) {
-    if (state.stage === next) return;
+    if (state.stage === next && !options.force) return;
     const animate = options.animate !== false;
     const target = next === "work" ? el.stageWork : el.stageEntry;
     const other = next === "work" ? el.stageEntry : el.stageWork;
@@ -257,7 +362,10 @@
   function afterWorkReveal() {
     if (state.firstRun || location.hash === "#advanced") {
       openAdvanced();
-      if (state.firstRun) setTimeout(() => el.apiKey.focus(), 300);
+      if (state.firstRun) {
+        clearTimeout(firstRunFocusTimer);
+        firstRunFocusTimer = setTimeout(() => el.apiKey.focus(), 300);
+      }
       state.firstRun = false;
     }
   }
@@ -292,6 +400,240 @@
       .join("");
     el.modelOptions.innerHTML = modelOptions;
     el.quickModelOptions.innerHTML = modelOptions;
+  }
+
+  /* ---------------------------------------------------- model comboboxes --
+   * Edge's app window often ignores the click target of a native datalist
+   * arrow, so both model fields also get a real chevron + menu. The existing
+   * <datalist> elements stay in the DOM as a fallback, and free typing keeps
+   * working: the input remains the source of truth, options only fill it. */
+  const modelCombos = [];
+
+  function providerIdFor(select) {
+    return (select && select.value) || el.provider.value;
+  }
+
+  function providerModelList(providerId) {
+    const preset = state.providerModels[providerId] || {};
+    return Array.isArray(preset.models) ? preset.models.slice() : [];
+  }
+
+  function closeAllCombos(except) {
+    modelCombos.forEach((combo) => {
+      if (combo !== except) combo.closeMenu();
+    });
+  }
+
+  function refreshModelCombos() {
+    modelCombos.forEach((combo) => combo.refresh());
+  }
+
+  function createModelCombo({ input, toggle, menu, providerSelect }) {
+    if (!input || !toggle || !menu) return null;
+    let open = false;
+    let options = [];
+    let activeIndex = -1;
+
+    function build() {
+      const models = providerModelList(providerIdFor(providerSelect));
+      const current = input.value.trim();
+      if (!models.length) {
+        menu.innerHTML =
+          '<p class="combo-empty" role="presentation">可直接输入自定义模型</p>';
+      } else {
+        const rows = models
+          .map((name) => {
+            const selected = name === current;
+            return (
+              `<button type="button" class="combo-option${selected ? " is-selected" : ""}"` +
+              ` role="option" tabindex="-1" aria-selected="${selected}"` +
+              ` data-value="${escapeHtml(name)}">` +
+              `<span class="combo-option-text">${escapeHtml(name)}</span>` +
+              `${selected ? '<span class="combo-check" aria-hidden="true">✓</span>' : ""}` +
+              "</button>"
+            );
+          })
+          .join("");
+        menu.innerHTML =
+          `${rows}<p class="combo-note" role="presentation">也可直接输入自定义模型</p>`;
+      }
+      options = $$(".combo-option", menu);
+      options.forEach((option) => {
+        option.addEventListener("click", () => choose(option.dataset.value || ""));
+      });
+      activeIndex = -1;
+    }
+
+    function place() {
+      if (!open) return;
+      const rect = input.getBoundingClientRect();
+      const width = Math.min(Math.max(rect.width, 180), 340);
+      menu.style.width = `${Math.round(width)}px`;
+      const menuRect = menu.getBoundingClientRect();
+      const margin = 8;
+      const left = Math.max(
+        margin,
+        Math.min(rect.left, window.innerWidth - width - margin)
+      );
+      let top = rect.bottom + 4;
+      if (top + menuRect.height > window.innerHeight - margin) {
+        const above = rect.top - menuRect.height - 4;
+        top =
+          above >= margin
+            ? above
+            : Math.max(margin, window.innerHeight - menuRect.height - margin);
+      }
+      menu.style.left = `${Math.round(left)}px`;
+      menu.style.top = `${Math.round(top)}px`;
+    }
+
+    function setActive(index, scroll = true) {
+      if (!options.length) {
+        activeIndex = -1;
+        return;
+      }
+      activeIndex = ((index % options.length) + options.length) % options.length;
+      options.forEach((option, i) =>
+        option.classList.toggle("is-active", i === activeIndex)
+      );
+      if (scroll && options[activeIndex]) {
+        options[activeIndex].scrollIntoView({ block: "nearest" });
+      }
+    }
+
+    function closeMenu() {
+      if (!open) return;
+      open = false;
+      menu.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+      input.setAttribute("aria-expanded", "false");
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    }
+
+    function openMenu() {
+      if (input.disabled || toggle.disabled) return;
+      closeAllCombos(combo);
+      build();
+      open = true;
+      menu.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+      input.setAttribute("aria-expanded", "true");
+      place();
+      const selected = options.findIndex((option) =>
+        option.classList.contains("is-selected")
+      );
+      setActive(selected >= 0 ? selected : -1, false);
+      window.addEventListener("scroll", place, true);
+      window.addEventListener("resize", place);
+    }
+
+    function refresh() {
+      build();
+      if (open) place();
+    }
+
+    function choose(value) {
+      input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      closeMenu();
+      input.focus();
+    }
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (!open) {
+          openMenu();
+          return;
+        }
+        setActive(activeIndex + (event.key === "ArrowDown" ? 1 : -1));
+        return;
+      }
+      if (event.key === "Enter" && open) {
+        event.preventDefault();
+        if (activeIndex >= 0 && options[activeIndex]) {
+          choose(options[activeIndex].dataset.value || "");
+        } else {
+          closeMenu();
+        }
+        return;
+      }
+      if (event.key === "Escape" && open) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeMenu();
+        return;
+      }
+      if (open && event.key === "Home") {
+        event.preventDefault();
+        setActive(0);
+        return;
+      }
+      if (open && event.key === "End") {
+        event.preventDefault();
+        setActive(options.length - 1);
+        return;
+      }
+      /* Tabbing out of the field should not leave a floating menu behind. */
+      if (open && event.key === "Tab") closeMenu();
+    });
+
+    toggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (open) {
+        closeMenu();
+      } else {
+        openMenu();
+        input.focus();
+      }
+    });
+
+    /* A pointerdown outside both the field and the menu dismisses it. */
+    document.addEventListener("pointerdown", (event) => {
+      if (!open) return;
+      const target = event.target;
+      if (menu.contains(target) || input.contains(target) || toggle.contains(target)) {
+        return;
+      }
+      closeMenu();
+    });
+    window.addEventListener("blur", closeMenu);
+
+    const combo = { input, toggle, menu, build, refresh, openMenu, closeMenu };
+    modelCombos.push(combo);
+    return combo;
+  }
+
+  function bindModelCombos() {
+    createModelCombo({
+      input: el.quickModel,
+      toggle: el.quickModelToggle,
+      menu: el.quickModelMenu,
+      providerSelect: el.quickProvider,
+    });
+    createModelCombo({
+      input: el.model,
+      toggle: el.modelToggle,
+      menu: el.modelMenu,
+      providerSelect: el.provider,
+    });
+  }
+
+  /* Docs of 30+ pages are where upstream blank-output bugs surface; suggest
+     the compat switch without ever turning it on for the user. */
+  function updateLongDocHint() {
+    if (!el.longDocHint) return;
+    const pages = totalPages();
+    if (pages >= 30) {
+      el.longDocHint.innerHTML =
+        `当前文档共 <strong>${pages}</strong> 页，属于长文档；` +
+        "若译文出现空白，建议开启兼容性优先后重译";
+      el.longDocHint.hidden = false;
+    } else {
+      el.longDocHint.hidden = true;
+    }
   }
 
   function renderGlossarySelect() {
@@ -395,6 +737,7 @@
     }
     el.btnStart.disabled = !state.files.length || state.running;
     renderPageModeOptions();
+    updateLongDocHint();
     if (state.files.length) pulse(el.summary);
   }
 
@@ -410,6 +753,10 @@
       el.engineText.textContent = "未检测到 BabelDOC";
       el.enginePath.textContent = "请先运行：uv tool install babeldoc";
     }
+    /* Narrow toolbars hide the label but keep the status dot; the full text
+       stays available as a tooltip / accessible name. */
+    el.enginePill.title = el.engineText.textContent;
+    el.enginePill.setAttribute("aria-label", el.engineText.textContent);
   }
 
   /* ------------------------------------------------------------ settings -- */
@@ -441,6 +788,7 @@
     el.customPrompt.value = settings.custom_prompt || "";
     el.skipScanned.checked = !!settings.skip_scanned;
     el.ocrWorkaround.checked = !!settings.ocr_workaround;
+    el.compatFirst.checked = !!settings.compat_first;
     el.openWhenDone.checked = settings.open_when_done !== false;
     el.rememberKey.checked = !!providerState.remember;
     el.baseUrl.value = providerState.base_url || preset.base_url || "";
@@ -487,6 +835,7 @@
       custom_prompt: el.customPrompt.value,
       skip_scanned: el.skipScanned.checked,
       ocr_workaround: el.ocrWorkaround.checked,
+      compat_first: el.compatFirst.checked,
       term_model: el.termModel.value.trim(),
       term_model_enabled: Boolean(el.termModel.value.trim()),
     };
@@ -506,6 +855,49 @@
     el.quickLangOut.value = el.langOut.value;
     el.quickDual.value = el.dualMode.value;
     el.quickGlossary.value = el.glossary.value;
+    updateKeyStatus();
+  }
+
+  /* Only the *state* of the active provider's key is surfaced here — never
+     the key itself. */
+  function activeKeyStatus() {
+    const providerId = el.provider.value;
+    if (providerId === "google_free") {
+      return {
+        label: "无需 Key",
+        state: "free",
+        title: "内置免费接口，无需填写 API Key",
+      };
+    }
+    const key = (el.apiKey.value || "").trim();
+    if (!key) {
+      return { label: "未填写", state: "empty", title: "还没有填写 API Key，点击填写" };
+    }
+    if (!el.rememberKey.checked) {
+      return {
+        label: "未保存",
+        state: "warn",
+        title: "已填写但未勾选「记住 Key」，重启应用后需要重新填写",
+      };
+    }
+    return { label: "已保存", state: "saved", title: "Key 已用 DPAPI 加密保存在本机" };
+  }
+
+  function updateKeyStatus() {
+    if (!el.quickKey || !el.quickKeyState) return;
+    const status = activeKeyStatus();
+    el.quickKeyState.textContent = status.label;
+    el.quickKeyState.dataset.state = status.state;
+    el.quickKey.title = `API Key：${status.label} · ${status.title}`;
+    el.quickKey.setAttribute("aria-label", `API Key：${status.label}，点击打开设置`);
+  }
+
+  /* Jump straight to the key field: open the existing sheet, reveal the
+     advanced section and focus #api-key (autosave picks the edit up). */
+  function openKeySettings() {
+    openSettingsSheet();
+    openAdvanced();
+    el.apiKey.focus();
   }
 
   function syncProviderFields(providerId) {
@@ -517,6 +909,10 @@
       el.quickModel.disabled = free;
       el.quickModel.placeholder = free ? "内置 Google 翻译" : "模型名称";
     }
+    [el.modelToggle, el.quickModelToggle].forEach((node) => {
+      if (node) node.disabled = free;
+    });
+    if (free) closeAllCombos(null);
     el.baseUrl.placeholder = free ? "内置免费接口，无需填写" : "https://…/v1";
     el.apiKey.placeholder = free ? "无需 API Key" : "sk-…";
     if (free) {
@@ -528,14 +924,45 @@
 
   function openSettingsSheet() {
     updateSettingsSummary();
+    updateLongDocHint();
+    refreshZoteroStatus();
     el.settingsModal.hidden = false;
     document.body.classList.add("settings-open");
+    if (el.btnSettingsEntry) el.btnSettingsEntry.setAttribute("aria-expanded", "true");
     el.settingsClose.focus();
+  }
+
+  /* Zotero add-on status: the download stays available even when the app is
+     offline, but a missing add-on build must not show a dead button. */
+  async function refreshZoteroStatus() {
+    if (!el.zoteroStatus) return;
+    try {
+      const data = await api("/api/zotero/status");
+      const plugin = (data && data.plugin) || {};
+      const available = Boolean(plugin.available);
+      const links = Number(data && data.link_count) || 0;
+      if (available) {
+        const version = plugin.version ? ` v${plugin.version}` : "";
+        el.zoteroStatus.textContent = `插件${version} 可下载 · 已在 BabelDOC 中关联 ${links} 篇`;
+      } else {
+        el.zoteroStatus.textContent = "插件文件缺失，请重新安装 ReadPI";
+      }
+      if (el.zoteroDownload) {
+        el.zoteroDownload.hidden = !available;
+        if (plugin.version) {
+          el.zoteroDownload.download = `babeldoc-zotero-${plugin.version}.xpi`;
+        }
+      }
+    } catch (error) {
+      el.zoteroStatus.textContent = `无法读取集成状态：${error.message}`;
+      if (el.zoteroDownload) el.zoteroDownload.hidden = true;
+    }
   }
 
   function closeSettingsSheet() {
     el.settingsModal.hidden = true;
     document.body.classList.remove("settings-open");
+    if (el.btnSettingsEntry) el.btnSettingsEntry.setAttribute("aria-expanded", "false");
     updateSettingsSummary();
   }
 
@@ -564,6 +991,7 @@
     el.rememberKey.checked = Boolean(saved && saved.remember);
     syncProviderFields(providerId);
     updateSettingsSummary();
+    refreshModelCombos();
     scheduleSave();
   }
 
@@ -624,6 +1052,62 @@
     } catch {
       /* ignore: the file may have moved away */
     }
+  }
+
+  /* The library hands a PDF over as /?prepare=<abs path> (the `file` alias is
+     accepted too). Loading it only preselects the file: the user still has to
+     confirm the settings and press 开始翻译, so this never starts a job. A
+     `job` parameter means the job-resume flow owns the page instead. */
+  async function prepareFileFromUrl() {
+    const params = new URLSearchParams(location.search);
+    if (params.has("job")) return;
+    const request = params.get("prepare") ?? params.get("file");
+    if (request === null) return;
+    const path = request || "";
+
+    /* Clean the URL right away so a refresh does not reopen the same PDF. */
+    params.delete("prepare");
+    params.delete("file");
+    const query = params.toString();
+    history.replaceState(
+      null,
+      "",
+      `${location.pathname}${query ? `?${query}` : ""}${location.hash}`
+    );
+
+    let files = [];
+    if (path) {
+      try {
+        const result = await api("/api/inspect", { method: "POST", body: { paths: [path] } });
+        files = Array.isArray(result && result.files) ? result.files : [];
+      } catch {
+        files = [];
+      }
+    }
+    if (!files.length) {
+      toast("无法打开这篇 PDF，可能已被移动或删除", "bad");
+      return;
+    }
+
+    /* Replace the restored session selection: the handed-over PDF wins. */
+    state.files = files;
+    /* The file was already chosen elsewhere, so reveal the work stage without
+       the entry fade and keep the focus on 开始翻译 (this also skips the
+       first-run API-key autofocus, which would otherwise steal it). */
+    state.firstRun = false;
+    clearTimeout(firstRunFocusTimer);
+    showStage("work", { animate: false, force: true });
+    renderFiles();
+    refreshSummary();
+    syncStage();
+    persistFiles();
+    toast("已载入 PDF，请确认翻译设置后点击「开始翻译」", "good");
+
+    el.btnStart.scrollIntoView({
+      block: "center",
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+    });
+    el.btnStart.focus({ preventScroll: true });
   }
 
   async function pickFiles() {
@@ -805,7 +1289,10 @@
      long it has been running. */
   function renderJobCard(job) {
     const files = state.files || [];
-    if (files.length === 1) {
+    if (!files.length && Array.isArray(job.files) && job.files.length) {
+      el.jobName.textContent = job.files.length === 1 ? job.files[0] : `${job.files.length} 个文件`;
+      el.jobName.title = job.files.join("\n");
+    } else if (files.length === 1) {
       el.jobName.textContent = files[0].name;
     } else if (files.length > 1) {
       el.jobName.textContent = `${files.length} 个文件`;
@@ -881,6 +1368,45 @@
     el.usageLine.hidden = false;
   }
 
+  /* "12,13,14,20" -> "12-14、20" for the blank-page advisory. */
+  function formatPageRanges(pages) {
+    const numbers = Array.from(
+      new Set(
+        (Array.isArray(pages) ? pages : [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      )
+    ).sort((a, b) => a - b);
+    if (!numbers.length) return "";
+    const parts = [];
+    let start = numbers[0];
+    let prev = numbers[0];
+    for (let i = 1; i <= numbers.length; i += 1) {
+      const value = numbers[i];
+      if (value === prev + 1) {
+        prev = value;
+        continue;
+      }
+      parts.push(start === prev ? String(start) : `${start}-${prev}`);
+      start = value;
+      prev = value;
+    }
+    return parts.join("、");
+  }
+
+  /* Results may carry the blank-output QA fields from the backend
+     (`warning` string + `blank_pages` number[]); both are optional. */
+  function resultAdvisory(item) {
+    const warning = typeof item.warning === "string" ? item.warning.trim() : "";
+    if (warning) return warning;
+    const ranges = formatPageRanges(item.blank_pages);
+    if (!ranges) return "";
+    return (
+      `检测到第 ${ranges} 页译文可能大面积空白，` +
+      "可在高级设置开启「兼容性优先（禁用富文本翻译）」后重译。"
+    );
+  }
+
   function renderResults(results) {
     if (!results || !results.length) {
       el.resultCard.hidden = true;
@@ -888,18 +1414,33 @@
     }
     el.resultCard.hidden = false;
     el.resultList.innerHTML = results
-      .map(
-        (item, index) => `
+      .map((item, index) => {
+        const advisory = resultAdvisory(item);
+        const canRetry =
+          Array.isArray(item.blank_pages) && item.blank_pages.length > 0;
+        return `
         <div class="result-item">
-          <span class="result-kind">${escapeHtml(item.kind)}</span>
-          <span class="result-name" title="${escapeHtml(item.path)}">${escapeHtml(item.name)}</span>
-          <span class="result-size">${formatSize(item.size)}</span>
-          <button class="btn btn-secondary" type="button" data-open="${index}">${
-            /\.pdf$/i.test(item.name) ? "阅读" : "打开"
-          }</button>
-          <button class="btn btn-secondary" type="button" data-reveal="${index}">文件夹</button>
-        </div>`
-      )
+          <div class="result-main">
+            <span class="result-kind">${escapeHtml(item.kind)}</span>
+            <span class="result-name" title="${escapeHtml(item.path)}">${escapeHtml(item.name)}</span>
+            <span class="result-size">${formatSize(item.size)}</span>
+            <button class="btn btn-secondary" type="button" data-open="${index}">${
+              /\.pdf$/i.test(item.name) ? "阅读" : "打开"
+            }</button>
+            <button class="btn btn-secondary" type="button" data-reveal="${index}">文件夹</button>
+          </div>
+          ${
+            advisory
+              ? `<p class="result-advisory"><span class="result-advisory-tag">提示</span>` +
+                `<span class="result-advisory-text">${escapeHtml(advisory)}</span>` +
+                (canRetry
+                  ? '<button class="result-advisory-retry" type="button" data-retry="1">用兼容模式重译</button>'
+                  : "") +
+                "</p>"
+              : ""
+          }
+        </div>`;
+      })
       .join("");
     $$("[data-open]", el.resultList).forEach((button) => {
       button.addEventListener("click", () => {
@@ -921,6 +1462,25 @@
         );
       });
     });
+    $$("[data-retry]", el.resultList).forEach((button) => {
+      button.addEventListener("click", retryWithCompat);
+    });
+  }
+
+  /* One-click remediation for a result whose translated pages came out blank:
+     turn on the compatibility fallback and run the same files again. */
+  function retryWithCompat() {
+    if (state.running) {
+      toast("已有任务在运行", "bad");
+      return;
+    }
+    if (!state.files.length) {
+      toast("源文件已不在列表中，请重新添加后再翻译", "bad");
+      return;
+    }
+    el.compatFirst.checked = true;
+    toast("已开启兼容性优先，正在重新翻译…", "good");
+    void startJob();
   }
 
   async function startJob() {
@@ -950,6 +1510,7 @@
       await api("/api/settings", { method: "POST", body: collectSettings() });
       const result = await api("/api/jobs", { method: "POST", body: payload });
       state.jobId = result.job.id;
+      localStorage.setItem("readpi-active-job", state.jobId);
       state.cursor = 0;
       el.log.textContent = "";
       el.usageLine.hidden = true;
@@ -978,6 +1539,31 @@
     } catch (error) {
       toast(`任务状态获取失败：${error.message}`, "bad");
       state.timer = setTimeout(poll, 2000);
+    }
+  }
+
+  async function resumeJobFromUrl() {
+    const jobId = new URLSearchParams(location.search).get("job");
+    if (!jobId) return;
+    try {
+      const job = await api(`/api/jobs/${encodeURIComponent(jobId)}?cursor=0`);
+      state.jobId = jobId;
+      if (!['succeeded', 'failed', 'cancelled'].includes(job.status)) {
+        localStorage.setItem("readpi-active-job", jobId);
+      }
+      state.cursor = job.cursor;
+      state.firstRun = false;
+      el.log.textContent = "";
+      showStage("work", { animate: false });
+      applyJob(job);
+      if (["succeeded", "failed", "cancelled"].includes(job.status)) {
+        finishJob(job);
+      } else {
+        setRunning(true);
+        poll();
+      }
+    } catch (error) {
+      toast(`无法打开翻译任务：${error.message}`, "bad");
     }
   }
 
@@ -1188,6 +1774,10 @@
   /* --------------------------------------------------------------- events -- */
   function bindEvents() {
     el.btnTheme.addEventListener("click", cycleTheme);
+    bindModelCombos();
+    bindHelpTips();
+    if (el.btnSettingsEntry) el.btnSettingsEntry.addEventListener("click", openSettingsSheet);
+    if (el.btnHeroSettings) el.btnHeroSettings.addEventListener("click", openSettingsSheet);
     el.btnChoose.addEventListener("click", (event) => {
       event.stopPropagation();
       pickFiles();
@@ -1233,6 +1823,7 @@
       });
     }
     if (el.openSettings) el.openSettings.addEventListener("click", openSettingsSheet);
+    if (el.quickKey) el.quickKey.addEventListener("click", openKeySettings);
     for (const node of [el.settingsClose, el.settingsCancel, el.settingsDone]) {
       if (node) node.addEventListener("click", closeSettingsSheet);
     }
@@ -1253,8 +1844,14 @@
     el.model.addEventListener("change", scheduleSave);
     el.model.addEventListener("input", scheduleSave);
     el.baseUrl.addEventListener("input", scheduleSave);
-    el.apiKey.addEventListener("input", scheduleSave);
-    el.rememberKey.addEventListener("change", scheduleSave);
+    el.apiKey.addEventListener("input", () => {
+      scheduleSave();
+      updateKeyStatus();
+    });
+    el.rememberKey.addEventListener("change", () => {
+      scheduleSave();
+      updateKeyStatus();
+    });
     el.langOut.addEventListener("change", scheduleSave);
     el.langIn.addEventListener("change", scheduleSave);
     el.dualMode.addEventListener("change", scheduleSave);
@@ -1264,6 +1861,7 @@
     el.customPrompt.addEventListener("input", scheduleSave);
     el.skipScanned.addEventListener("change", scheduleSave);
     el.ocrWorkaround.addEventListener("change", scheduleSave);
+    el.compatFirst.addEventListener("change", scheduleSave);
     el.openWhenDone.addEventListener("change", scheduleSave);
     el.outputDir.addEventListener("input", scheduleSave);
     el.autoGlossary.addEventListener("change", scheduleSave);
@@ -1352,6 +1950,8 @@
       /* First run settings are shown once a file exists (afterWorkReveal). */
       state.firstRun = Boolean(data.first_run);
       await restoreFiles();
+      await resumeJobFromUrl();
+      await prepareFileFromUrl();
       if (state.stage === "entry") {
         el.stageEntry.classList.add("stage-enter");
         clearTimeout(entranceTimer);

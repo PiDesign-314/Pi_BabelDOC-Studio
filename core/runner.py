@@ -4,17 +4,33 @@ and progress, and renames the produced PDFs into friendly Chinese names.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import pricing
+from . import babelcache, pdfqa, pricing
+
+try:  # translation completeness verification (paragraph level)
+    from . import translate_qa
+except Exception:  # pragma: no cover - only while the module is absent
+    translate_qa = None
+
+#: Runtime guard injected into every BabelDOC child process (see core/babelguard).
+GUARD_DIR = Path(__file__).resolve().parent / "babelguard"
+
+#: Temporary directories created for guard status files / compat-mode retries.
+QC_TEMP_PREFIX = "babeldoc-studio-qc-"
+
+#: One automatic compatibility-mode retry per run when translations are lost.
+QC_MAX_RETRIES = 1
 
 BABELDOC_FALLBACKS = [
     Path.home() / ".local" / "bin" / "babeldoc.exe",
@@ -132,7 +148,9 @@ def reference_prompt(base_prompt: str, lang_out: str) -> str:
     return f"{role}\n\n{REFERENCE_RULE.format(lang=lang_out)}"
 
 
-def build_command(cfg: dict, files: list[str], exe: str, pages: str | None = None) -> list[str]:
+def build_command(
+    cfg: dict, files: list[str], exe: str, pages: str | None = None, compat: bool = False
+) -> list[str]:
     cmd = _babeldoc_prefix(exe) + [
         "--openai",
         "--openai-model", cfg["model"],
@@ -144,6 +162,20 @@ def build_command(cfg: dict, files: list[str], exe: str, pages: str | None = Non
         # The free Google endpoint has no LLM, so skip term extraction and
         # rich-text prompts that would need an instruction-following model.
         cmd += ["--no-auto-extract-glossary", "--disable-rich-text-translate"]
+    elif cfg.get("compat_first"):
+        # Rich-text placeholders are a common source of missing/blank
+        # translated runs on long papers; this is the compatibility fallback
+        # BabelDOC documents for such documents.
+        cmd.append("--disable-rich-text-translate")
+    if compat and "--disable-rich-text-translate" not in cmd:
+        # Automatic recovery after a completeness check found lost
+        # translations.  Note this does NOT switch BabelDOC to a different
+        # translator: 0.6.4 still uses its JSON batch protocol for every
+        # LLM-capable translator.  The flag only removes rich-text
+        # placeholders, which is the documented compatibility knob for
+        # paragraphs that typeset blank; the runtime guard in core/babelguard
+        # is what actually prevents empty paragraphs.
+        cmd.append("--disable-rich-text-translate")
     if cfg.get("term_model_enabled") and cfg.get("term_model"):
         cmd += ["--openai-term-extraction-model", cfg["term_model"]]
 
@@ -363,6 +395,7 @@ class Job:
     runs: list[dict] = field(default_factory=list)
     usage_runs: list[dict] = field(default_factory=list)
     usage_current: dict = field(default_factory=dict)
+    quality: dict = field(default_factory=dict)
     _pending_usage: str | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -488,6 +521,7 @@ class Job:
                 "finished_at": self.finished_at,
                 "usage": usage,
                 "cost": cost,
+                "quality": self.quality,
                 "files": [Path(f).name for f in self.files],
             }
 
@@ -593,60 +627,394 @@ def _move_into_paper(output_dir: Path, stem: str, name: str, path: Path) -> Path
         return path
 
 
-def collect_results(
+def _read_json(path: Path | None) -> dict | None:
+    if path is None:
+        return None
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def guard_environment(env: dict, status_path: Path, doc: str) -> dict:
+    """Return *env* with the BabelDOC runtime guard enabled for one run.
+
+    The guard lives in ``core/babelguard`` and is imported by the child
+    interpreter as ``sitecustomize``; it never touches the installed BabelDOC
+    package.  When the guard directory is missing the environment is returned
+    unchanged so translation still works.
+    """
+    if not GUARD_DIR.is_dir():
+        return env
+    env = dict(env)
+    existing = env.get("PYTHONPATH") or ""
+    env["PYTHONPATH"] = str(GUARD_DIR) + (
+        (os.pathsep + existing) if existing else ""
+    )
+    env["BABELDOC_STUDIO_GUARD"] = "1"
+    env["BABELDOC_STUDIO_GUARD_STATUS"] = str(status_path)
+    env["BABELDOC_STUDIO_GUARD_DOC"] = str(doc)
+    return env
+
+
+def new_artifacts(
     output_dir: Path,
     before: dict[str, float],
     source_files: list[str],
     lang_out: str,
 ) -> list[dict]:
-    source_stems = {}
+    """PDF artefacts produced since *before*, without moving them yet."""
+    source_stems: dict[str, str] = {}
+    source_paths: dict[str, str] = {}
     for path in source_files:
         stem = Path(path).stem
         source_stems[stem.lower()] = stem
+        source_paths[stem.lower()] = str(path)
 
-    results: list[dict] = []
+    found: list[dict] = []
     try:
-        entries = list(output_dir.iterdir())
+        entries = sorted(output_dir.iterdir())
     except OSError:
-        return results
-
-    for path in sorted(entries):
-        if not path.is_file():
+        return found
+    lang = (lang_out or "").lower()
+    for path in entries:
+        if not path.is_file() or not path.name.lower().endswith(".pdf"):
             continue
         key = str(path)
         try:
             mtime = path.stat().st_mtime_ns
         except OSError:
             continue
-        changed = key not in before or before[key] != mtime
-        if not changed:
+        if key in before and before[key] == mtime:
             continue
-
-        lowered = path.name.lower()
-        if lowered.endswith(".glossary.csv"):
-            glossary = _glossary_target(path.name, lang_out)
-            if glossary:
-                glossary_name, glossary_stem = glossary
-                path = _move_into_paper(output_dir, glossary_stem, glossary_name, path)
-            results.append(
-                {"name": path.name, "path": str(path), "kind": "术语表", "size": path.stat().st_size}
-            )
-            continue
-
-        mapping = _pretty_target(path.name, source_stems, lang_out)
+        mapping = _pretty_target(path.name, source_stems, lang)
         if not mapping:
             continue
         new_name, kind, paper_stem = mapping
-        target = _move_into_paper(output_dir, paper_stem, new_name, path)
-        results.append(
+        found.append(
             {
-                "name": target.name,
-                "path": str(target),
+                "path": path,
+                "name": new_name,
                 "kind": kind,
-                "size": target.stat().st_size,
+                "paper_stem": paper_stem,
+                "source": source_paths.get(paper_stem.lower(), ""),
             }
         )
+    return found
+
+
+def _verify_artifact(artifact: dict, guard_status: dict | None) -> dict:
+    if translate_qa is None:
+        return {"ok": True, "checked": False, "missing": [], "warnings": []}
+    return translate_qa.verify(
+        artifact.get("source", ""),
+        artifact["path"],
+        artifact["kind"],
+        guard_status=guard_status,
+    )
+
+
+def _report_score(report: dict) -> tuple[int, int, int]:
+    """Sort key: fewer lost paragraphs, then more translated, then fewer kept."""
+    return (
+        -len(report.get("missing") or []),
+        int(report.get("translated_paragraphs") or 0),
+        -len(report.get("untranslated") or []),
+    )
+
+
+def _report_better(candidate: dict, current: dict) -> bool:
+    return _report_score(candidate) > _report_score(current)
+
+
+def _trim_report(report: dict, limit: int = 50) -> dict:
+    """Cap long paragraph lists so job snapshots stay small for the UI."""
+    trimmed = dict(report)
+    for key in ("missing", "untranslated"):
+        items = list(report.get(key) or [])
+        trimmed[key] = items[:limit]
+        trimmed[f"{key}_total"] = len(items)
+    warnings = [str(line) for line in report.get("warnings") or []]
+    trimmed["warnings"] = warnings[:10]
+    return trimmed
+
+
+def _artifact_key(paper_stem: str, kind: str) -> tuple[str, str]:
+    return ((paper_stem or "").lower(), kind or "")
+
+
+def _spawn_babeldoc(
+    job: "Job",
+    run: dict,
+    output_dir: Path,
+    env: dict,
+    pages: str,
+    compat: bool,
+    status_dir: Path | None = None,
+) -> tuple[int, Path]:
+    """Run one babeldoc invocation and stream its log into the job."""
+    directory = status_dir
+    if directory is None:
+        directory = Path(tempfile.mkdtemp(prefix=QC_TEMP_PREFIX))
+    status_path = directory / "guard.json"
+    doc = "、".join(Path(f).name for f in run["files"]) or "document"
+    run_env = guard_environment(env, status_path, doc)
+    command = build_command(
+        job.config, run["files"], job.command[0], pages, compat=compat
+    )
+    job.process = None
+    try:
+        job.process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            env=run_env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert job.process.stdout is not None
+        for line in job.process.stdout:
+            job.add_log(line)
+        code = job.process.wait()
+        job.commit_usage()
+    except BaseException:
+        # A failed launch must not leave the guard status directory behind.
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    return code, status_path
+
+
+def _check_run(
+    job: "Job",
+    run: dict,
+    output_dir: Path,
+    before: dict[str, float],
+    env: dict,
+    pages: str,
+    status_path: Path,
+) -> dict:
+    """Verify one run's PDFs and recover once in compatibility mode.
+
+    Returns a mapping ``(paper stem, kind) -> verification report`` so the
+    final results can carry the report next to the produced file.
+    """
+    lang_out = job.config.get("lang_out") or "zh"
+    reports: dict[tuple[str, str], dict] = {}
+    try:
+        artifacts = new_artifacts(output_dir, before, run["files"], lang_out)
+    except Exception as exc:  # pragma: no cover - defensive
+        job.add_log(f"[studio] 译文完整性校验跳过：{exc}")
+        return reports
+    if not artifacts:
+        return reports
+
+    single_file = len(run["files"]) == 1
+    status = _read_json(status_path) if single_file else None
+    for artifact in artifacts:
+        report = _verify_artifact(artifact, status)
+        reports[_artifact_key(artifact["paper_stem"], artifact["kind"])] = report
+        for line in (translate_qa.summarize(report) if translate_qa else []):
+            job.add_log(f"[studio] {line}")
+
+    lost = [r for r in reports.values() if r.get("missing")]
+    retries_done = int(run.get("compat_retries") or 0)
+    if not lost or job.cancel_requested or retries_done >= QC_MAX_RETRIES:
+        if lost:
+            job.add_log(
+                "[studio] 仍有段落缺译文，任务结果已标记为“译文不完整”，请查看结果提示。"
+            )
+        return reports
+
+    run["compat_retries"] = retries_done + 1
+    job.add_log(
+        "[studio] 完整性校验发现缺译文，正在用兼容模式（禁用富文本翻译）重译一次…"
+    )
+    retry_dir = Path(tempfile.mkdtemp(prefix=QC_TEMP_PREFIX))
+    try:
+        code, retry_status_path = _spawn_babeldoc(
+            job, run, retry_dir, env, pages, compat=True, status_dir=retry_dir
+        )
+        if code != 0:
+            job.add_log(f"[studio] 兼容模式重译失败（退出码 {code}），保留第一次结果。")
+            return reports
+        retry_status = _read_json(retry_status_path) if single_file else None
+        retry_artifacts = new_artifacts(retry_dir, {}, run["files"], lang_out)
+        improved = False
+        for retry_artifact in retry_artifacts:
+            key = _artifact_key(retry_artifact["paper_stem"], retry_artifact["kind"])
+            candidate = _verify_artifact(retry_artifact, retry_status)
+            current = reports.get(key)
+            if current is None or _report_better(candidate, current):
+                target = output_dir / retry_artifact["path"].name
+                try:
+                    shutil.copy2(retry_artifact["path"], target)
+                except OSError as exc:  # pragma: no cover - unexpected
+                    job.add_log(f"[studio] 无法替换重译结果：{exc}")
+                    continue
+                reports[key] = candidate
+                improved = True
+                job.add_log(
+                    "[studio] 兼容模式重译后译文更完整："
+                    f"缺失 {len(current['missing']) if current else 0} → "
+                    f"{len(candidate['missing'])} 段"
+                )
+        if not improved:
+            job.add_log("[studio] 兼容模式重译未改善译文完整性，保留第一次结果。")
+    except Exception as exc:  # pragma: no cover - defensive
+        job.add_log(f"[studio] 兼容模式重译出错：{exc}")
+    finally:
+        shutil.rmtree(retry_dir, ignore_errors=True)
+    return reports
+
+
+def collect_results(
+    output_dir: Path,
+    before: dict[str, float],
+    source_files: list[str],
+    lang_out: str,
+    qc_by_key: dict | None = None,
+) -> list[dict]:
+    source_paths: dict[str, str] = {}
+    for path in source_files:
+        source_paths[Path(path).stem.lower()] = str(path)
+
+    results: list[dict] = []
+    try:
+        entries = list(output_dir.iterdir())
+    except OSError:
+        entries = []
+
+    # Glossaries keep their own scan: they are not PDF artefacts.
+    for path in sorted(entries):
+        if not path.is_file() or not path.name.lower().endswith(".glossary.csv"):
+            continue
+        key = str(path)
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError:
+            continue
+        if key in before and before[key] == mtime:
+            continue
+        glossary = _glossary_target(path.name, lang_out)
+        if glossary:
+            glossary_name, glossary_stem = glossary
+            path = _move_into_paper(output_dir, glossary_stem, glossary_name, path)
+        results.append(
+            {
+                "name": path.name,
+                "path": str(path),
+                "kind": "术语表",
+                "size": path.stat().st_size,
+                # keep the same result shape as the PDF artefacts
+                "blank_pages": [],
+                "warning": "",
+                "incomplete": False,
+            }
+        )
+
+    for artifact in new_artifacts(output_dir, before, source_files, lang_out):
+        source = artifact.get("source") or source_paths.get(
+            artifact["paper_stem"].lower(), ""
+        )
+        target = _move_into_paper(
+            output_dir, artifact["paper_stem"], artifact["name"], artifact["path"]
+        )
+
+        # Post-translation quality check: upstream BabelDOC can leave large
+        # blank areas.  Best-effort only — a QA failure must never fail the job.
+        try:
+            qa = pdfqa.inspect_translation(source, target, artifact["kind"])
+        except Exception:
+            qa = {"blank_pages": [], "warning": ""}
+        report = (qc_by_key or {}).get(
+            _artifact_key(artifact["paper_stem"], artifact["kind"])
+        ) or {}
+
+        missing_pages = sorted(
+            {
+                int(item.get("page") or 0)
+                for item in report.get("missing") or []
+                if item.get("page")
+            }
+        )
+        blank_pages = sorted(set(qa.get("blank_pages") or []) | set(missing_pages))
+        warnings = [str(line) for line in report.get("warnings") or [] if line]
+        if report.get("missing") and not missing_pages:
+            # A record without a page number must still be visible to the user.
+            warnings.append(
+                f"检测到 {len(report['missing'])} 个段落没有译文（页码未知），请检查结果。"
+            )
+        warning = "；".join(warnings) if warnings else (qa.get("warning") or "")
+
+        payload = {
+            "name": target.name,
+            "path": str(target),
+            "source": source,
+            "kind": artifact["kind"],
+            "size": target.stat().st_size,
+            "blank_pages": blank_pages,
+            "warning": warning[:300],
+            "incomplete": bool(report.get("missing")),
+        }
+        if report:
+            payload["qc"] = _trim_report(report)
+        results.append(payload)
     return results
+
+
+def _job_quality(results: list[dict]) -> dict:
+    """Aggregate the per-result completeness reports for the job snapshot.
+
+    BabelDOC emits both a mono and a dual PDF for the same source document by
+    default; both carry the same verification report, so reports are grouped by
+    source and the most complete one represents the document instead of being
+    summed (which would double count every paragraph).
+    """
+    groups: dict[str, list[dict]] = {}
+    for result in results:
+        report = result.get("qc") or {}
+        if not report:
+            continue
+        key = str(result.get("source") or result.get("name") or "")
+        groups.setdefault(key, []).append(report)
+
+    missing = untranslated = 0
+    checked = False
+    pages: set[int] = set()
+    warnings: list[str] = []
+    for reports in groups.values():
+        report = max(
+            reports,
+            key=lambda item: (
+                int(item.get("expected_paragraphs") or 0),
+                int(item.get("translated_paragraphs") or 0),
+            ),
+        )
+        if report.get("checked"):
+            checked = True
+        missing += int(
+            report.get("missing_total", len(report.get("missing") or []))
+        )
+        untranslated += int(
+            report.get("untranslated_total", len(report.get("untranslated") or []))
+        )
+        pages.update(
+            int(item.get("page") or 0) for item in report.get("missing") or []
+        )
+        warnings.extend(str(line) for line in report.get("warnings") or [] if line)
+    pages.discard(0)
+    return {
+        "checked": checked,
+        "ok": checked and missing == 0,
+        "missing": missing,
+        "untranslated": untranslated,
+        "pages": sorted(pages),
+        "warnings": list(dict.fromkeys(warnings))[:12],
+    }
 
 
 class JobManager:
@@ -704,6 +1072,14 @@ class JobManager:
     def _run(self, job: Job, output_dir: Path) -> None:
         job.status = "running"
         job.stage = "启动 babeldoc"
+        # A cached empty model answer is applied without validation by
+        # BabelDOC's fallback path and shows up as a blank paragraph; drop
+        # those poisoned rows before every run.
+        cleared = babelcache.clear_empty_translations()
+        if cleared:
+            job.add_log(
+                f"[studio] 已清理 {cleared} 条空译文缓存（避免再次出现空白译文）"
+            )
         before = _snapshot_dir(output_dir)
         env = dict(os.environ)
         env.setdefault("PYTHONIOENCODING", "utf-8")
@@ -740,24 +1116,11 @@ class JobManager:
             job.add_log(
                 f"[studio] 开始处理 {names} · 页面 {pages or '全部'}{note}"
             )
-            command = build_command(job.config, run["files"], job.command[0], pages)
+            run_before = _snapshot_dir(output_dir)
             try:
-                job.process = subprocess.Popen(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    bufsize=1,
-                    env=env,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                code, status_path = _spawn_babeldoc(
+                    job, run, output_dir, env, pages, compat=False
                 )
-                assert job.process.stdout is not None
-                for line in job.process.stdout:
-                    job.add_log(line)
-                code = job.process.wait()
-                job.commit_usage()
             except Exception as exc:
                 job.status = "failed"
                 job.error = f"启动失败：{exc}"
@@ -766,10 +1129,24 @@ class JobManager:
                 return
 
             if job.cancel_requested:
+                shutil.rmtree(status_path.parent, ignore_errors=True)
                 break
             if code != 0:
+                shutil.rmtree(status_path.parent, ignore_errors=True)
                 failed_code = code
                 break
+
+            # Completeness check after every invocation: lost translations are
+            # recovered once in compatibility mode and reported otherwise.
+            try:
+                run["qc"] = _check_run(
+                    job, run, output_dir, run_before, env, pages, status_path
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                run["qc"] = {}
+                job.add_log(f"[studio] 译文完整性校验出错：{exc}")
+            finally:
+                shutil.rmtree(status_path.parent, ignore_errors=True)
 
         if job.cancel_requested:
             job.status = "cancelled"
@@ -780,9 +1157,19 @@ class JobManager:
             return
 
         if failed_code is None:
+            qc_by_key: dict[tuple[str, str], dict] = {}
+            for run in job.runs:
+                qc_by_key.update(run.get("qc") or {})
             job.results = collect_results(
-                output_dir, before, job.files, job.config.get("lang_out", "zh")
+                output_dir,
+                before,
+                job.files,
+                job.config.get("lang_out", "zh"),
+                qc_by_key=qc_by_key,
             )
+            job.quality = _job_quality(job.results)
+            for line in job.quality.get("warnings") or []:
+                job.add_log(f"[studio] {line}")
             job.status = "succeeded"
             job.add_log("[studio] 翻译完成")
             job.stage = "完成"

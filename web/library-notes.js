@@ -1,4 +1,4 @@
-/* BabelDOC Studio — notes view layered on top of the result library.
+/* ReadPI — notes view layered on top of the result library.
  *
  * Loaded after library.js. It only toggles a body class so the result grid /
  * controls are hidden while the notes view is shown; library.js keeps owning
@@ -326,7 +326,7 @@
          polling. An HTTP error means this backend cannot restart itself. */
       if (error && error.status) {
         state.restarting = false;
-        state.restartError = `重启接口不可用（HTTP ${error.status}）。请关闭 BabelDOC Studio 窗口后重新打开。`;
+        state.restartError = `重启接口不可用（HTTP ${error.status}）。请关闭 ReadPI 窗口后重新打开。`;
         renderStale();
         return;
       }
@@ -352,7 +352,7 @@
       }
     }
     state.restarting = false;
-    state.restartError = `重启后 ${Math.round((RESTART_POLL_MS * RESTART_TRIES) / 1000)} 秒内没有检测到新的后端版本，请关闭 BabelDOC Studio 窗口后重新打开。`;
+    state.restartError = `重启后 ${Math.round((RESTART_POLL_MS * RESTART_TRIES) / 1000)} 秒内没有检测到新的后端版本，请关闭 ReadPI 窗口后重新打开。`;
     renderStale();
   }
 

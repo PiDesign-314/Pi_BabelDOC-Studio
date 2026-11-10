@@ -25,8 +25,9 @@ PRESETS: list[dict] = [
         "id": "deepseek",
         "name": "DeepSeek",
         "base_url": "https://api.deepseek.com",
-        "models": ["deepseek-chat", "deepseek-reasoner"],
-        "hint": "deepseek-chat 速度快、成本低，适合整篇论文翻译。",
+        "models": ["deepseek-flash", "deepseek-v4-pro"],
+        "hint": "deepseek-flash（V4.1 Flash）速度快、成本低，适合整篇论文翻译；"
+        "deepseek-v4-pro 质量更高，适合排版复杂的论文。",
     },
     {
         "id": "qwen",

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>BabelDOC Studio</title>
+<title>ReadPI</title>
 <link rel="icon" href="/favicon.ico?v=140" sizes="32x32">
 <link rel="icon" href="/favicon.svg?v=140" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/styles.css">
@@ -15,13 +15,23 @@
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand">
-        <img class="mark-logo" src="/favicon.svg?v=140" width="30" height="30" alt="BabelDOC Studio">
+        <img class="mark-logo" src="/favicon.svg?v=140" width="30" height="30" alt="ReadPI">
         <div class="brand-text">
-          <h1>BabelDOC Studio</h1>
+          <h1>ReadPI</h1>
           <p>PDF 论文翻译 · 保留原始排版</p>
         </div>
       </div>
       <div class="topbar-right">
+        <button class="pill-btn topbar-settings" id="btn-settings-entry" type="button"
+                title="翻译设置：服务商、模型、API Key" aria-haspopup="dialog"
+                aria-expanded="false" aria-controls="settings-modal" aria-label="翻译设置">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.2"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
+          </svg>
+          <span class="pill-btn-label">翻译设置</span>
+        </button>
         <a class="pill-btn" href="/library" title="翻译结果、阅读与批注">
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
                stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
@@ -94,7 +104,11 @@
           </span>
         </div>
 
-        <p class="hero-foot">上传后再挑选语言、翻译模型与术语库</p>
+        <p class="hero-foot">
+          上传前可先在
+          <button class="foot-link" id="btn-hero-settings" type="button">翻译设置</button>
+          里选好服务、模型与术语库
+        </p>
       </div>
     </section>
 
@@ -134,9 +148,25 @@
             <span>翻译服务</span>
             <div class="summary-controls">
               <select id="quick-provider" class="summary-select" aria-label="翻译服务"></select>
-              <input id="quick-model" class="summary-input" list="quick-model-options"
-                     placeholder="模型名称" spellcheck="false" autocomplete="off" aria-label="模型">
+              <div class="combo summary-combo" id="quick-model-combo">
+                <input id="quick-model" class="summary-input" list="quick-model-options"
+                       placeholder="模型名称" spellcheck="false" autocomplete="off" aria-label="模型"
+                       aria-haspopup="listbox" aria-controls="quick-model-menu" aria-expanded="false">
+                <button class="combo-toggle" id="quick-model-toggle" type="button" tabindex="-1"
+                        aria-label="展开模型列表" aria-haspopup="listbox"
+                        aria-controls="quick-model-menu" aria-expanded="false">
+                  <svg viewBox="0 0 12 8" width="11" height="7" aria-hidden="true">
+                    <path d="M1 1.5 6 6.5l5-5" fill="none" stroke="currentColor" stroke-width="1.8"
+                          stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </div>
               <datalist id="quick-model-options"></datalist>
+              <button class="summary-key" id="quick-key" type="button" aria-label="API Key 设置"
+                      title="API Key 设置">
+                <span class="summary-key-label" aria-hidden="true">Key</span>
+                <span class="summary-key-state" id="quick-key-state" data-state="empty">未填写</span>
+              </button>
             </div>
           </div>
           <div class="summary-row">
@@ -228,6 +258,7 @@
             </div>
             <div class="job-foot">
               <span class="job-stage" id="stage">准备中</span>
+              <a class="job-library-link" href="/library">前往结果库</a>
               <button class="log-toggle" id="btn-log" type="button" aria-expanded="false">
                 运行日志 <span class="chev">›</span>
               </button>
@@ -290,8 +321,19 @@
             <div class="row">
               <label for="model">模型</label>
               <div class="select-wrap">
-                <input id="model" list="model-options" placeholder="选择或输入模型名称"
-                       spellcheck="false" autocomplete="off">
+                <div class="combo modal-combo" id="model-combo">
+                  <input id="model" list="model-options" placeholder="选择或输入模型名称"
+                         spellcheck="false" autocomplete="off"
+                         aria-haspopup="listbox" aria-controls="model-menu" aria-expanded="false">
+                  <button class="combo-toggle" id="model-toggle" type="button" tabindex="-1"
+                          aria-label="展开模型列表" aria-haspopup="listbox"
+                          aria-controls="model-menu" aria-expanded="false">
+                    <svg viewBox="0 0 12 8" width="11" height="7" aria-hidden="true">
+                      <path d="M1 1.5 6 6.5l5-5" fill="none" stroke="currentColor" stroke-width="1.8"
+                            stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                </div>
                 <datalist id="model-options"></datalist>
               </div>
             </div>
@@ -451,9 +493,35 @@
                 </div>
               </div>
               <div class="row inline-toggles">
-                <label class="check"><input type="checkbox" id="skip-scanned"> 跳过扫描件检测</label>
-                <label class="check"><input type="checkbox" id="ocr-workaround"> OCR 兼容模式</label>
+                <span class="check-wrap"
+                      data-help="电子版 PDF（文字可选中）可跳过扫描件识别以节省时间；扫描版/图片型 PDF 请关闭。">
+                  <label class="check"><input type="checkbox" id="skip-scanned"
+                         aria-describedby="help-skip-scanned"> 跳过扫描件检测</label>
+                  <button class="help-dot" type="button" aria-label="跳过扫描件检测的说明"
+                          aria-describedby="help-skip-scanned">?</button>
+                  <span class="help-sr" id="help-skip-scanned">电子版 PDF（文字可选中）可跳过扫描件识别以节省时间；扫描版/图片型 PDF 请关闭。</span>
+                </span>
+                <span class="check-wrap"
+                      data-help="扫描版或文字无法提取时开启，会为文字添加背景以提升识别率；普通电子版无需开启。">
+                  <label class="check"><input type="checkbox" id="ocr-workaround"
+                         aria-describedby="help-ocr-workaround"> OCR 兼容模式</label>
+                  <button class="help-dot" type="button" aria-label="OCR 兼容模式的说明"
+                          aria-describedby="help-ocr-workaround">?</button>
+                  <span class="help-sr" id="help-ocr-workaround">扫描版或文字无法提取时开启，会为文字添加背景以提升识别率；普通电子版无需开启。</span>
+                </span>
+                <span class="check-wrap"
+                      data-help="关闭富文本占位符；适合公式、表格、多栏、嵌入字体复杂的长论文。若译文出现大面积空白，建议开启后重译。普通纯文本论文可保持关闭。">
+                  <label class="check"
+                         title="关闭富文本排版，减少译文大面积空白；版式还原会略差">
+                    <input type="checkbox" id="compat-first"
+                           aria-describedby="help-compat-first"> 兼容性优先（禁用富文本翻译）
+                  </label>
+                  <button class="help-dot" type="button" aria-label="兼容性优先的说明"
+                          aria-describedby="help-compat-first">?</button>
+                  <span class="help-sr" id="help-compat-first">关闭富文本占位符；适合公式、表格、多栏、嵌入字体复杂的长论文。若译文出现大面积空白，建议开启后重译。普通纯文本论文可保持关闭。</span>
+                </span>
               </div>
+              <p class="longdoc-hint" id="longdoc-hint" hidden></p>
             </div>
 
             <div class="test-row">
@@ -474,6 +542,26 @@
           </div>
         </div>
         <p class="group-foot">修改会自动保存，下次打开继续沿用。</p>
+      </section>
+      <section class="group" aria-label="Zotero 集成">
+        <div class="group-card">
+          <p class="subhead">Zotero 集成</p>
+          <div class="rows">
+            <div class="row toggle-row">
+              <div class="row-text">
+                <label class="row-label" for="zotero-download">从 Zotero 直接阅读</label>
+                <p class="hint" id="zotero-status">正在检测插件…</p>
+              </div>
+              <a class="inline-action" id="zotero-download" href="/api/zotero/plugin.xpi"
+                 download="babeldoc-zotero.xpi" title="下载 Zotero 插件安装包">下载插件</a>
+            </div>
+          </div>
+          <p class="hint zotero-help">
+            安装：Zotero → 工具 → 插件 → 右上角齿轮 → 从文件安装…，选择刚下载的 .xpi。
+            装好后在文献列表右键，或 PDF 阅读器工具栏点「在 ReadPI 中阅读」：
+            首次打开自动接入文件，再次打开会回到上次的阅读位置。
+          </p>
+        </div>
       </section>
     </div>
     <footer class="settings-foot">
@@ -528,6 +616,9 @@
 </div>
 
 <input type="file" id="file-input" accept="application/pdf,.pdf" multiple hidden>
+<div class="help-tip" id="help-tip" role="tooltip" hidden></div>
+<div class="combo-menu" id="quick-model-menu" role="listbox" aria-label="模型预设" hidden></div>
+<div class="combo-menu" id="model-menu" role="listbox" aria-label="模型预设" hidden></div>
 <div class="toasts" id="toasts"></div>
 <script src="/assets/app.js"></script>
 <script src="/assets/context-menu.js"></script>

@@ -4,11 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>结果库 · BabelDOC Studio</title>
+<title>结果库 · ReadPI</title>
 <link rel="icon" href="/favicon.ico?v=140" sizes="32x32">
 <link rel="icon" href="/favicon.svg?v=140" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/styles.css">
 <link rel="stylesheet" href="/assets/library.css">
+<link rel="stylesheet" href="/assets/job-monitor.css">
 <link rel="stylesheet" href="/assets/library-notes.css">
 </head>
 <body class="lib-page">
@@ -16,9 +17,9 @@
 <header class="topbar">
   <div class="topbar-inner wide">
     <div class="brand">
-      <img class="mark-logo" src="/favicon.svg?v=140" width="30" height="30" alt="BabelDOC Studio">
+      <img class="mark-logo" src="/favicon.svg?v=140" width="30" height="30" alt="ReadPI">
       <div class="brand-text">
-        <h1>BabelDOC Studio</h1>
+        <h1>ReadPI</h1>
         <p>结果库 · 阅读、批注与整理</p>
       </div>
     </div>
@@ -86,6 +87,35 @@
     <div class="rail-list" id="rail-list"></div>
     <p class="rail-hint">拖动论文到左侧合集，即可归类。</p>
     <p class="rail-empty" id="rail-empty">还没有合集。<br>点「＋」新建，再把论文拖进来。</p>
+
+    <div class="rail-zotero" id="zotero-block" hidden>
+      <div class="rail-head">
+        <span>Zotero 文库</span>
+        <button class="rail-add" id="btn-zotero-refresh" type="button"
+                title="重新读取 Zotero 文库" aria-label="重新读取 Zotero 文库">
+          <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10 6a4 4 0 1 1-1.2-2.85"/>
+            <path d="M10.2 1.6v2.9H7.3"/>
+          </svg>
+        </button>
+      </div>
+      <p class="rail-zotero-sync" id="zotero-synced"></p>
+      <button class="rail-item" id="zotero-all" type="button" data-zfilter="all"
+              aria-pressed="false" title="显示 Zotero 文库里的全部文献">
+        <svg class="rail-ico" viewBox="0 0 16 16" width="16" height="16" fill="none"
+             stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+             stroke-linejoin="round" aria-hidden="true">
+          <path d="M2.2 3.1h3.1v9.8H2.2zM6.5 3.1h3.1v9.8H6.5zM10.8 3.1h3v9.8h-3z"/>
+          <path d="M2.2 6.1h3.1M6.5 6.1h3.1M10.8 6.1h3"/>
+        </svg>
+        <span class="rail-name">全部文献</span>
+        <em id="zotero-count-all">0</em>
+      </button>
+      <div class="rail-list zotero-tree" id="zotero-tree" role="group"
+           aria-label="Zotero 文件夹"></div>
+    </div>
+    <p class="rail-hint rail-zotero-hint" id="zotero-hint" hidden>还没有同步 Zotero 文库：在 Zotero 里点顶部工具栏的 ReadPI 图标即可同步</p>
   </aside>
 
   <section class="lib-main">
@@ -94,7 +124,7 @@
         <span id="lib-title">全部结果</span>
         <span class="lib-count" id="lib-count">0</span>
       </h2>
-      <p class="page-sub">同篇论文的译文、双语稿与术语表归在一起。</p>
+      <p class="page-sub" id="lib-sub">同篇论文的译文、双语稿与术语表归在一起。</p>
     </div>
 
     <div class="lib-controls">
@@ -138,7 +168,7 @@
       </div>
       <h3 id="empty-title">还没有翻译结果</h3>
       <p id="empty-text">翻译完成后，文件会自动出现在这里：可以阅读、做批注、重命名或清理。</p>
-      <div class="lib-empty-actions">
+      <div class="lib-empty-actions" id="empty-actions">
         <a class="btn btn-primary" href="/">去翻译 PDF</a>
         <button class="btn btn-secondary" id="btn-add-dir-2" type="button">添加已有文件夹</button>
       </div>
@@ -250,6 +280,7 @@
 <div class="toasts" id="toasts"></div>
 
 <script src="/assets/shared.js"></script>
+<script src="/assets/job-monitor.js"></script>
 <script src="/assets/library.js"></script>
 <script src="/assets/library-notes.js"></script>
 <script src="/assets/context-menu.js"></script>

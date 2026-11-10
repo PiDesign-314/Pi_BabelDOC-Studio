@@ -4,14 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>阅读 · BabelDOC Studio</title>
+<title>阅读 · ReadPI</title>
 <link rel="icon" href="/favicon.ico?v=140" sizes="32x32">
 <link rel="icon" href="/favicon.svg?v=140" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/styles.css">
 <link rel="stylesheet" href="/assets/viewer.css">
+<link rel="stylesheet" href="/assets/job-monitor.css">
 <link rel="stylesheet" href="/assets/reader-toc.css">
 <link rel="stylesheet" href="/assets/reader-ai.css">
 <link rel="stylesheet" href="/assets/notes.css">
+<link rel="stylesheet" href="/assets/reverse-reading.css">
+<script src="/assets/reverse-reading.js"></script>
 </head>
 <body class="reader">
 
@@ -90,6 +93,15 @@
       </svg>
     </button>
 
+    <button class="icon-btn r-invert" id="btn-invert" type="button" aria-pressed="false"
+            title="反色阅读" aria-label="反色阅读">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+           stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.5"/>
+        <path d="M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor" stroke="none"/>
+      </svg>
+    </button>
+
     <button class="icon-btn r-theme" id="btn-theme" type="button" title="切换外观" aria-label="切换外观">
       <svg class="ico-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
            stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
@@ -109,12 +121,12 @@
   <select id="paper-theme"><option value="white">原色</option><option value="cream">暖米</option><option value="sage">浅绿</option><option value="blue">雾蓝</option><option value="rose">浅粉</option><option value="ink">水墨屏</option><option value="custom">自定义</option></select>
   <input id="paper-color" type="color" value="#f3ecda">
   <select id="draw-tool"><option value="select">选择 / 移动</option><option value="text">页面文字</option><option value="note">便签</option><option value="pen">自由画</option><option value="line">直线</option><option value="erase">橡皮擦（整笔）</option></select>
-  <input id="ink-color" type="color" value="#30343b">
+  <input id="ink-color" type="color" value="#ff375f">
   <input id="ink-width" type="number" min="0.5" max="30" step="0.5" value="2">
   <input id="ink-opacity" type="range" min="5" max="100" value="100">
   <input id="text-font" type="hidden" value="sans-serif">
   <input id="text-size" type="number" min="8" max="96" value="18">
-  <select id="highlight-style"><option value="marker">荧光笔</option><option value="crayon">蜡笔</option><option value="hand">手绘</option><option value="underline">实线划线</option><option value="pencil">铅笔划线</option><option value="wavy">波浪线</option></select>
+  <select id="highlight-style"><option value="marker">荧光笔</option><option value="crayon">蜡笔</option><option value="hand">手绘下划线 · 自然</option><option value="hand-soft">手绘下划线 · 轻微</option><option value="hand-strong">手绘下划线 · 明显</option><option value="underline">实线划线</option><option value="pencil">铅笔划线</option><option value="wavy">波浪线</option></select>
   <input type="checkbox" id="color-hints" checked>
   <button id="btn-note-tool" type="button" aria-pressed="false" hidden></button>
 </div>
@@ -164,9 +176,21 @@
     <div class="r-panel r-panel-toc" id="panel-toc" hidden></div>
     <div class="r-panel r-panel-notes" id="panel-notes" hidden></div>
     <div class="r-side-resize" id="side-resize" title="拖动调整侧栏宽度" role="separator" aria-orientation="vertical"></div>
+    <button class="r-side-handle" id="side-handle" type="button" title="收起侧栏" aria-label="收起侧栏" aria-expanded="true">
+      <svg viewBox="0 0 10 16" width="9" height="16" fill="none" stroke="currentColor"
+           stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M6.6 3.4 3 8l3.6 4.6"/>
+      </svg>
+    </button>
   </aside>
 
   <main class="r-stage" id="stage">
+    <button class="r-side-expand" id="side-expand" type="button" title="展开侧栏" aria-label="展开侧栏" hidden>
+      <svg viewBox="0 0 10 16" width="9" height="16" fill="none" stroke="currentColor"
+           stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3.4 3.4 7 8l-3.6 4.6"/>
+      </svg>
+    </button>
     <div class="r-scroll" id="scroll">
       <div class="r-loading" id="loading">
         <span class="r-spinner" aria-hidden="true"></span>正在载入 PDF…
@@ -223,16 +247,7 @@
 <aside class="r-notes" id="notes-drawer" hidden aria-label="笔记"></aside>
 
 <div class="r-sel" id="sel-toolbar" hidden>
-  <div class="r-sel-colors">
-    <button class="r-dot yellow" type="button" data-color="yellow" title="黄色高亮"></button>
-    <button class="r-dot green" type="button" data-color="green" title="绿色高亮"></button>
-    <button class="r-dot blue" type="button" data-color="blue" title="蓝色高亮"></button>
-    <button class="r-dot pink" type="button" data-color="pink" title="粉色高亮"></button>
-    <button class="r-dot orange" type="button" data-color="orange" title="橙色高亮"></button>
-    <button class="r-dot purple" type="button" data-color="purple" title="紫色高亮"></button>
-    <button class="r-dot teal" type="button" data-color="teal" title="青色高亮"></button>
-    <button class="r-dot red" type="button" data-color="red" title="红色高亮"></button>
-  </div>
+  <div class="r-sel-colors" id="sel-colors" aria-label="颜色标签"></div>
   <span class="r-vsep"></span>
   <div class="r-sel-style" id="sel-styles" role="group" aria-label="标记样式"></div>
   <span class="r-vsep"></span>
@@ -241,20 +256,15 @@
   <button class="r-sel-action" id="sel-note" type="button">写批注</button>
   <button class="r-sel-action" id="sel-copy" type="button">复制</button>
 </div>
+<!-- Opened by the toolbar's "+" dot: pick a colour and it becomes a new tag,
+     then the selection is highlighted with it without a trip to the dock. -->
+<input class="r-color-native" id="sel-color-picker" type="color" value="#3aa0ff"
+       tabindex="-1" aria-hidden="true">
 
 <div class="r-editor" id="editor" hidden>
   <div class="r-editor-top">
     <span class="r-editor-page" id="editor-page"></span>
-    <div class="r-colors" id="editor-colors">
-      <button class="r-dot yellow" type="button" data-color="yellow" title="黄色"></button>
-      <button class="r-dot green" type="button" data-color="green" title="绿色"></button>
-      <button class="r-dot blue" type="button" data-color="blue" title="蓝色"></button>
-      <button class="r-dot pink" type="button" data-color="pink" title="粉色"></button>
-      <button class="r-dot orange" type="button" data-color="orange" title="橙色"></button>
-      <button class="r-dot purple" type="button" data-color="purple" title="紫色"></button>
-      <button class="r-dot teal" type="button" data-color="teal" title="青色"></button>
-      <button class="r-dot red" type="button" data-color="red" title="红色"></button>
-    </div>
+    <div class="r-colors" id="editor-colors" aria-label="颜色标签"></div>
     <button class="r-editor-close" id="editor-close" type="button" aria-label="关闭">✕</button>
   </div>
   <div class="r-editor-styles" id="editor-styles" role="group" aria-label="标记样式" hidden></div>
@@ -273,6 +283,8 @@
 
 <script src="/assets/pdfjs/build/pdf.min.js"></script>
 <script src="/assets/shared.js"></script>
+<script src="/assets/job-monitor.js"></script>
+<script src="/assets/hand-underline.js"></script>
 <script src="/assets/viewer.js"></script>
 <script src="/assets/reader-toc.js"></script>
 <script src="/assets/reader-ai.js"></script>

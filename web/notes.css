@@ -1334,11 +1334,12 @@ body.rn-resizing { user-select: none; }
 
 /* ------------------------------------------------------------ dark tweaks -- */
 @media (prefers-color-scheme: dark) {
-  .r-notes { box-shadow: 0 28px 80px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.35); }
-  .rn-rich mark { color: #111; }
-  .rn-premark { color: #111; }
-  .rn-del { color: #ffb4ad; background: rgba(255, 69, 58, 0.14); }
-  .rn-ins { color: inherit; background: rgba(52, 199, 89, 0.16); }
+  /* An explicit in-app light choice must win over the OS dark preference. */
+  :root:not([data-theme="light"]) .r-notes { box-shadow: 0 28px 80px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.35); }
+  :root:not([data-theme="light"]) .rn-rich mark { color: #111; }
+  :root:not([data-theme="light"]) .rn-premark { color: #111; }
+  :root:not([data-theme="light"]) .rn-del { color: #ffb4ad; background: rgba(255, 69, 58, 0.14); }
+  :root:not([data-theme="light"]) .rn-ins { color: inherit; background: rgba(52, 199, 89, 0.16); }
 }
 
 /* ------------------------------------------------------------- narrow -- */

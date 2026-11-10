@@ -1,0 +1,55 @@
+<!-- ReadPI preference pane (Zotero 7+ fragment: no <!DOCTYPE>, XUL is
+     the default namespace, HTML elements are prefixed with html:).
+     `preference="<full pref key>"` is the Zotero 7 binding: the pane loader
+     syncs the control with Zotero.Prefs, no <preference> element needed. -->
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml">
+	<groupbox>
+		<label><html:h2>ReadPI</html:h2></label>
+		<description>
+			在 Zotero 的文献列表右键菜单、PDF 阅读器工具栏和阅读器页面右键菜单里使用
+			「在 ReadPI 中阅读」，把本地 PDF 交给 ReadPI 打开并定位到当前页。
+		</description>
+
+		<hbox align="center">
+			<label value="启动器路径"/>
+			<html:input type="text" style="width: 320px"
+			           preference="extensions.babeldoc.appPath"
+			           placeholder="可执行文件或 Start.bat；留空则使用 launch-info.json"/>
+			<button label="浏览…" oncommand="BabeldocPrefs.browseLauncher()"/>
+		</hbox>
+
+		<hbox align="center">
+			<label value="launch-info.json 路径"/>
+			<html:input type="text" style="width: 320px"
+			           preference="extensions.babeldoc.launchInfoPath"
+			           placeholder="留空则使用 %APPDATA%\BabelDOC-Studio\zotero\launch-info.json"/>
+			<button label="浏览…" oncommand="BabeldocPrefs.browseLaunchInfo()"/>
+		</hbox>
+
+		<hbox align="center">
+			<label value="服务端口"/>
+			<html:input type="text" inputmode="numeric" min="0" max="65535" style="width: 90px"
+			           preference="extensions.babeldoc.port"/>
+			<description>留空或 0 = 自动（先读 launch-info.json 的端口，再扫描 8765–8804）</description>
+		</hbox>
+
+		<checkbox label="ReadPI 未运行时自动启动"
+		          preference="extensions.babeldoc.autoLaunch"/>
+		<checkbox label="打开时跳转到阅读器的当前页"
+		          preference="extensions.babeldoc.passPage"/>
+	</groupbox>
+
+	<groupbox>
+		<label><html:h2>连接状态</html:h2></label>
+		<description id="babeldoc-status">未检测</description>
+		<hbox>
+			<button label="检测" oncommand="BabeldocPrefs.test()"/>
+			<button label="打开 ReadPI" oncommand="BabeldocPrefs.openApp()"/>
+		</hbox>
+		<description>
+			端口被占用时 ReadPI 会自动改用下一个端口；插件在自动模式下也会扫描
+			8765–8804，因此一般不需要手动填写端口。
+		</description>
+	</groupbox>
+</vbox>

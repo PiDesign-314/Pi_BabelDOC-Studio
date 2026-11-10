@@ -23,14 +23,109 @@ annotations.ANNOTATION_DIR = root / "annotations"
 pdf = root / "dual.pdf"
 doc = pymupdf.open()
 page = doc.new_page(width=1200, height=800)
+# Insert the two columns in separate passes so the PDF.js text layer keeps a
+# reading order per column: a multi-line range then stays inside one column.
 for y in range(80, 700, 25):
     page.insert_text((60, y), "Original paragraph example for selection testing.", fontsize=14)
+for y in range(80, 700, 25):
     page.insert_text((660, y), "Translated paragraph example for reading.", fontsize=14)
 doc.save(pdf)
 doc.close()
 
 server = make_server("127.0.0.1", 0, app.app, threaded=True)
 threading.Thread(target=server.serve_forever, daemon=True).start()
+
+
+def select_reader_text(pg, start=0, count=5):
+    """Select a run of ``count`` lines in the first page's source column.
+
+    ``start`` skips a number of lines so a test can create a second highlight
+    that does not overlap the first one (overlap is now merged on purpose).
+    """
+    pg.evaluate(
+        """(args) => {
+          const [start, count] = args;
+          const page = document.querySelector('.r-sheet .r-page').getBoundingClientRect();
+          const half = page.left + page.width * 0.48;
+          const spans = [...document.querySelectorAll('.r-sheet .r-text span')]
+            .map((s) => ({ s, r: s.getBoundingClientRect() }))
+            .filter(({ r }) => r.width > 4 && r.left > page.left && r.left < half);
+          if (!spans.length) return;
+          /* PDF.js emits one span per text run (and one for trailing spaces);
+             group by visual line so a window of N lines is really N lines. */
+          const lines = new Map();
+          for (const span of spans) {
+            const key = Math.round(span.r.top);
+            if (!lines.has(key)) lines.set(key, []);
+            lines.get(key).push(span);
+          }
+          const keys = [...lines.keys()].sort((a, b) => a - b);
+          const firstLine = lines.get(keys[Math.min(start, keys.length - 1)]);
+          const lastLine = lines.get(keys[Math.min(start + count - 1, keys.length - 1)]);
+          const first = firstLine.slice().sort((a, b) => a.r.left - b.r.left)[0];
+          const last = lastLine.slice().sort((a, b) => a.r.left - b.r.left).pop();
+          const range = document.createRange();
+          range.setStart(first.s.firstChild, 0);
+          range.setEnd(last.s.firstChild, last.s.firstChild.data.length);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        }""",
+        [start, count],
+    )
+
+
+def mark_ids(pg):
+    return set(pg.eval_on_selector_all(".r-mark", "els => els.map((el) => el.dataset.id)"))
+
+
+def assert_marks_do_not_overlap(pg, item_id, label):
+    """Bands of one multi-line highlight must never stack on top of each other."""
+    boxes = pg.evaluate(
+        """(id) => [...document.querySelectorAll('.r-mark')]
+            .filter((el) => el.dataset.id === id)
+            .map((el) => {
+              const r = el.getBoundingClientRect();
+              return { x: r.x, y: r.y, w: r.width, h: r.height };
+            })""",
+        item_id,
+    )
+    assert len(boxes) > 1, f"{label}: expected a multi-line highlight, got {boxes}"
+    for i in range(len(boxes)):
+        for j in range(i + 1, len(boxes)):
+            a, b = boxes[i], boxes[j]
+            vertical = min(a["y"] + a["h"], b["y"] + b["h"]) - max(a["y"], b["y"])
+            horizontal = min(a["x"] + a["w"], b["x"] + b["w"]) - max(a["x"], b["x"])
+            assert not (vertical > 1 and horizontal > 0.5), (
+                f"{label}: mark boxes overlap by {vertical:.1f}px: {a} / {b}"
+            )
+    return boxes
+
+
+def cross_highlight_overlaps(pg):
+    """Any pair of marks belonging to different annotations that overlap."""
+    return pg.evaluate(
+        """() => {
+          const boxes = [...document.querySelectorAll('.r-mark')].map((el) => {
+            const r = el.getBoundingClientRect();
+            return { id: el.dataset.id, x: r.x, y: r.y, w: r.width, h: r.height };
+          });
+          const out = [];
+          for (let i = 0; i < boxes.length; i += 1) {
+            for (let j = i + 1; j < boxes.length; j += 1) {
+              const a = boxes[i];
+              const b = boxes[j];
+              if (a.id === b.id) continue;
+              const v = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+              const h = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+              if (v > 1 && h > 0.5) out.push([a.id, b.id, v, h]);
+            }
+          }
+          return out;
+        }"""
+    )
+
 
 with sync_playwright() as p:
     browser = p.chromium.launch(channel="msedge", headless=True, args=["--no-proxy-server"])
@@ -45,6 +140,12 @@ with sync_playwright() as p:
     box = pg.locator(".r-sheet .r-page").bounding_box()
     x, y = box["x"] + 200, box["y"] + 200
 
+    # an empty history must be a safe no-op, not a JS error
+    pg.keyboard.press("Control+z")
+    pg.wait_for_timeout(300)
+    assert pg.locator(".r-mark").count() == 0
+    assert "撤回" in pg.inner_text("#toasts")
+
     # freehand + line
     pg.locator('#reader-dock [data-tool="pen"]').click()
     pg.mouse.move(x, y)
@@ -53,6 +154,10 @@ with sync_playwright() as p:
     pg.mouse.up()
     pg.wait_for_timeout(500)
     assert pg.locator(".r-ink path").count() == 1
+    # a fresh pen stroke must use the automatic red, not the old dark grey
+    assert pg.eval_on_selector(
+        ".r-ink path", "el => (el.getAttribute('stroke') || '').toLowerCase()"
+    ) == "#ff375f", "pen stroke is not red by default"
     pg.locator('#reader-dock [data-tool="line"]').click()
     pg.mouse.move(x + 20, y + 90)
     pg.mouse.down()
@@ -125,31 +230,7 @@ with sync_playwright() as p:
 
     # highlight with an explicit style, then restyle it from the editor
     pg.locator('#reader-dock [data-style="underline"]').click()
-    pg.evaluate(
-        """() => {
-          const page = document.querySelector('.r-sheet .r-page').getBoundingClientRect();
-          const half = page.left + page.width * 0.48;
-          let spans = [...document.querySelectorAll('.r-sheet .r-text span')]
-            .map((s) => ({ s, r: s.getBoundingClientRect() }))
-            .filter(({ r }) => r.width > 4 && r.top > page.top + 60 && r.top < page.top + 200 && r.left > page.left && r.left < half)
-            .sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left);
-          if (spans.length < 3) {
-            spans = [...document.querySelectorAll('.r-sheet .r-text span')]
-              .map((s) => ({ s, r: s.getBoundingClientRect() }))
-              .filter(({ r }) => r.width > 4 && r.left > page.left && r.left < half)
-              .sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left);
-          }
-          const first = spans[0].s.firstChild;
-          const last = spans[Math.min(4, spans.length - 1)];
-          const range = document.createRange();
-          range.setStart(first, 0);
-          range.setEnd(last.s.firstChild, last.s.firstChild.data.length);
-          const sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-          document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-        }"""
-    )
+    select_reader_text(pg)
     pg.wait_for_timeout(400)
     pg.locator("#sel-toolbar .r-dot.yellow").click()
     pg.wait_for_timeout(800)
@@ -163,6 +244,235 @@ with sync_playwright() as p:
     pg.wait_for_timeout(800)
     assert pg.eval_on_selector_all(".r-mark", "els => els.every((e) => e.dataset.style === 'pencil')")
     pg.locator("#editor-done").click()
+
+    # Ctrl+Z takes the newest highlight back and updates the sidebar count
+    # (start further down the page: an overlapping selection is merged, tested
+    # separately below)
+    marks_before = pg.locator(".r-mark").count()
+    count_before = pg.inner_text("#anno-count")
+    select_reader_text(pg, 8)
+    pg.wait_for_timeout(400)
+    pg.locator("#sel-toolbar .r-dot.blue").click()
+    pg.wait_for_timeout(800)
+    assert pg.locator(".r-mark").count() > marks_before
+    assert pg.inner_text("#anno-count") != count_before
+    pg.keyboard.press("Control+z")
+    pg.wait_for_timeout(900)
+    assert pg.locator(".r-mark").count() == marks_before, "Ctrl+Z did not remove the highlight"
+    assert pg.inner_text("#anno-count") == count_before, "sidebar count did not follow the undo"
+
+    # Ctrl+Shift+Z redoes it, Ctrl+Z takes it back again
+    pg.keyboard.press("Control+Shift+z")
+    pg.wait_for_timeout(900)
+    assert pg.locator(".r-mark").count() > marks_before, "Ctrl+Shift+Z did not redo the highlight"
+    assert "已重做" in pg.inner_text("#toasts")
+    pg.keyboard.press("Control+z")
+    pg.wait_for_timeout(900)
+    assert pg.locator(".r-mark").count() == marks_before
+    assert pg.inner_text("#anno-count") == count_before
+
+    # ---- selection style buttons apply immediately, with the remembered colour
+    ids_before = mark_ids(pg)
+    select_reader_text(pg, 5, 4)
+    pg.wait_for_timeout(400)
+    assert pg.locator("#sel-toolbar").is_visible()
+    pg.locator('#sel-styles [data-style="wavy"]').click()
+    pg.wait_for_timeout(800)
+    new_ids = mark_ids(pg) - ids_before
+    assert len(new_ids) == 1, new_ids
+    style_id = new_ids.pop()
+    assert not pg.locator("#sel-toolbar").is_visible(), "toolbar stayed open after applying a style"
+    assert "已标记所选文字" in pg.inner_text("#toasts")
+    assert pg.eval_on_selector_all(
+        f'.r-mark[data-id="{style_id}"]', "els => els.every((e) => e.dataset.style === 'wavy')"
+    ), "the clicked style was not applied to the new highlight"
+    # the last colour dot clicked above was blue; no colour needed this time
+    assert pg.eval_on_selector_all(
+        f'.r-mark[data-id="{style_id}"]', "els => els.every((e) => e.classList.contains('blue'))"
+    ), "style click did not use the remembered highlight colour"
+    assert pg.evaluate(
+        "() => JSON.parse(localStorage.getItem('babeldoc-reader')).highlightColor"
+    ) == "blue"
+    assert_marks_do_not_overlap(pg, style_id, "style-click highlight")
+
+    # ---- hand-drawn underline: one toolbar entry, preset chosen in the editor
+    ids_before = mark_ids(pg)
+    select_reader_text(pg, 18, 3)
+    pg.wait_for_timeout(400)
+    # Only one hand entry is visible now; the three presets are not parallel
+    # toolbar buttons any more.
+    assert pg.locator('#sel-styles [data-style="hand"]').count() == 1, "missing single hand style button"
+    assert pg.locator('#sel-styles [data-style="hand-soft"]').count() == 0
+    assert pg.locator('#sel-styles [data-style="hand-strong"]').count() == 0
+    assert pg.locator('#sel-styles [data-style="hand"]').get_attribute("data-family") == "hand"
+    pg.locator('#sel-styles [data-style="hand"]').click()
+    pg.wait_for_timeout(900)
+    hand_ids = mark_ids(pg) - ids_before
+    assert len(hand_ids) == 1, hand_ids
+    hand_id = hand_ids.pop()
+    assert pg.locator(
+        f'.r-mark[data-id="{hand_id}"][data-family="hand"] svg.hand-underline path.hand-underline-ink'
+    ).count() >= 1, "hand underline did not render an SVG path"
+    # a hand mark must be a transparent band + SVG ink, never a filled highlighter
+    assert pg.eval_on_selector(
+        f'.r-mark[data-id="{hand_id}"]', "el => getComputedStyle(el).backgroundColor"
+    ) in ("rgba(0, 0, 0, 0)", "transparent"), "hand mark painted a filled band"
+    # choose the 明显 preset through the editor chips (the single hand button
+    # applies the remembered preset; the chips live next to the editor styles)
+    hand_mark = pg.locator(f'.r-mark[data-id="{hand_id}"]').first.bounding_box()
+    pg.mouse.click(hand_mark["x"] + 14, hand_mark["y"] + hand_mark["height"] / 2)
+    pg.wait_for_timeout(500)
+    assert pg.locator("#editor").is_visible(), "clicking the hand mark did not open the editor"
+    assert pg.locator("#editor-hand-presets").is_visible(), "hand preset chips are not shown for a hand mark"
+    pg.locator('#editor-hand-presets [data-hand-preset="hand-strong"]').click()
+    pg.wait_for_timeout(900)
+    assert pg.eval_on_selector_all(
+        f'.r-mark[data-id="{hand_id}"]', "els => els.every((e) => e.dataset.style === 'hand-strong')"
+    ), "editor preset chip did not restyle the hand highlight"
+    assert pg.evaluate(
+        "() => JSON.parse(localStorage.getItem('babeldoc-reader')).handStyle"
+    ) == "hand-strong", "hand preset was not persisted"
+    assert pg.locator(
+        f'.r-mark[data-id="{hand_id}"][data-style="hand-strong"] svg.hand-underline path.hand-underline-ink'
+    ).count() >= 1, "hand underline lost its SVG path after the preset change"
+    first_d = pg.eval_on_selector(
+        f'.r-mark[data-id="{hand_id}"] path.hand-underline-ink', "el => el.getAttribute('d')"
+    )
+    assert first_d and first_d.startswith("M "), first_d
+    # Repainting the page keeps exactly the same deterministic stroke.
+    pg.evaluate("window.dispatchEvent(new Event('resize'))")
+    pg.wait_for_timeout(900)
+    same_d = pg.eval_on_selector(
+        f'.r-mark[data-id="{hand_id}"] path.hand-underline-ink', "el => el.getAttribute('d')"
+    )
+    assert same_d == first_d, "hand-drawn underline was regenerated on repaint"
+    pg.locator("#editor-done").click()
+    pg.wait_for_timeout(400)
+
+    # ---- a new highlight trims an older overlapping one instead of stacking
+    ids_before = mark_ids(pg)
+    anno_before = pg.inner_text("#anno-count")
+    select_reader_text(pg, 12, 5)
+    pg.wait_for_timeout(400)
+    pg.locator("#sel-toolbar .r-dot.orange").click()
+    pg.wait_for_timeout(900)
+    outer_ids = mark_ids(pg) - ids_before
+    assert len(outer_ids) == 1, outer_ids
+    outer_id = outer_ids.pop()
+    outer_bands = pg.locator(f'.r-mark[data-id="{outer_id}"]').count()
+    assert outer_bands >= 4, outer_bands
+    assert_marks_do_not_overlap(pg, outer_id, "outer highlight")
+
+    select_reader_text(pg, 14, 2)  # strictly inside the highlight above
+    pg.wait_for_timeout(400)
+    pg.locator("#sel-toolbar .r-dot.blue").click()
+    pg.wait_for_timeout(900)
+    assert "已合并重叠高亮" in pg.inner_text("#toasts")
+    trimmed = pg.locator(f'.r-mark[data-id="{outer_id}"]').count()
+    assert trimmed < outer_bands, (trimmed, outer_bands, "inside highlight did not trim the outer one")
+    assert pg.inner_text("#anno-count") != anno_before
+    assert not cross_highlight_overlaps(pg), cross_highlight_overlaps(pg)
+    inner_id = (mark_ids(pg) - ids_before - {outer_id}).pop()
+    assert_marks_do_not_overlap(pg, inner_id, "inner highlight")
+
+    # one Ctrl+Z restores the outer highlight and drops the inner one
+    pg.keyboard.press("Control+z")
+    pg.wait_for_timeout(900)
+    assert pg.locator(f'.r-mark[data-id="{outer_id}"]').count() == outer_bands, "undo did not restore the trimmed highlight"
+    assert inner_id not in mark_ids(pg)
+
+    # ---- highlighting exactly the same words replaces, not duplicates
+    select_reader_text(pg, 12, 5)
+    pg.wait_for_timeout(400)
+    pg.locator("#sel-toolbar .r-dot.green").click()
+    pg.wait_for_timeout(900)
+    assert "已合并重叠高亮" in pg.inner_text("#toasts")
+    assert outer_id not in mark_ids(pg), "fully covered highlight was stacked instead of replaced"
+    assert not cross_highlight_overlaps(pg)
+    replacement = mark_ids(pg) - ids_before
+    assert len(replacement) == 1, replacement
+    green_id = replacement.pop()
+    pg.keyboard.press("Control+z")
+    pg.wait_for_timeout(900)
+    assert green_id not in mark_ids(pg)
+    assert outer_id in mark_ids(pg), "undo did not bring the replaced highlight back"
+
+    # ---- note badges sit in the page margin, not on the following text
+    mark_box = pg.locator(f'.r-mark[data-id="{outer_id}"]').first.bounding_box()
+    # click near the start of the band: the centre of a wide line can land on a
+    # page-text annotation that was placed there by an earlier step
+    pg.mouse.click(mark_box["x"] + 14, mark_box["y"] + mark_box["height"] / 2)
+    pg.wait_for_timeout(400)
+    assert pg.locator("#editor").is_visible()
+    pg.locator("#editor-text").fill("页边批注")
+    pg.locator("#editor-done").click()
+    pg.wait_for_timeout(800)
+    assert pg.locator(".r-note-badge").count() == 1
+    badge_box = pg.locator(".r-note-badge").bounding_box()
+    page_box = pg.locator(".r-sheet .r-page").first.bounding_box()
+    assert badge_box["x"] >= page_box["x"] - 1, (badge_box, page_box)
+    assert badge_box["x"] + badge_box["width"] <= page_box["x"] + page_box["width"] + 1
+    assert badge_box["x"] + badge_box["width"] < mark_box["x"] + 1, (
+        "note badge still covers the highlighted text",
+        badge_box,
+        mark_box,
+    )
+    # hover preview and click still work from the new position
+    badge = pg.locator(".r-note-badge")
+    badge.hover()
+    pg.wait_for_timeout(400)
+    assert pg.locator("#tip").is_visible()
+    pg.mouse.click(badge_box["x"] + badge_box["width"] / 2, badge_box["y"] + badge_box["height"] / 2)
+    pg.wait_for_timeout(400)
+    assert pg.locator("#editor").is_visible(), "badge click no longer opens the annotation"
+    assert pg.locator("#editor-text").input_value() == "页边批注"
+    pg.locator("#editor-close").click()
+    pg.wait_for_timeout(300)
+
+    # ---- sidebar collapse: edge handle + floating expand tab + persisted state
+    assert pg.locator("#sidebar").is_visible()
+    assert pg.locator("#side-expand").is_hidden()
+    pg.locator("#side-handle").click()
+    pg.wait_for_timeout(500)
+    assert not pg.locator("#sidebar").is_visible(), "sidebar handle did not collapse the sidebar"
+    assert pg.locator("#side-expand").is_visible(), "no floating expand tab after collapsing"
+    assert pg.get_attribute("#btn-sidebar", "aria-pressed") == "false"
+    assert pg.evaluate(
+        "() => JSON.parse(localStorage.getItem('babeldoc-reader')).sidebarHidden === true"
+    ), "collapsed state was not persisted"
+    pg.locator("#side-expand").click()
+    pg.wait_for_timeout(500)
+    assert pg.locator("#sidebar").is_visible()
+    assert pg.locator("#side-expand").is_hidden()
+
+    # the resize strip still works next to the new collapse tab
+    width_before = pg.eval_on_selector("#sidebar", "el => el.getBoundingClientRect().width")
+    strip = pg.locator("#side-resize").bounding_box()
+    pg.mouse.move(strip["x"] + 2, strip["y"] + 200)
+    pg.mouse.down()
+    pg.mouse.move(strip["x"] + 60, strip["y"] + 200, steps=6)
+    pg.mouse.up()
+    pg.wait_for_timeout(500)
+    width_after = pg.eval_on_selector("#sidebar", "el => el.getBoundingClientRect().width")
+    assert width_after > width_before + 20, (width_before, width_after)
+    pg.locator("#side-resize").dblclick(position={"x": 2, "y": 200})
+    pg.wait_for_timeout(500)
+    assert abs(pg.eval_on_selector("#sidebar", "el => el.getBoundingClientRect().width") - 178) < 2
+
+    # ---- a left-column annotation gets a mirrored left rail and gutter
+    pg.locator('#reader-dock [data-action="layout"]').click()
+    pg.wait_for_timeout(900)
+    body_class = pg.get_attribute("body", "class") or ""
+    assert "margin-notes" in body_class
+    assert "margin-left" in body_class, "no left-margin body state for a left-side card"
+    assert pg.locator(".r-margin-left .r-mcard").count() > 0, "left-side cards are not in a left rail"
+    page_box = pg.locator(".r-sheet .r-page").first.bounding_box()
+    left_card = pg.locator(".r-margin-left .r-mcard").first.bounding_box()
+    assert left_card["x"] + left_card["width"] <= page_box["x"] + 1, (left_card, page_box)
+    padding_left = pg.eval_on_selector(".r-scroll", "el => getComputedStyle(el).paddingLeft")
+    assert float(padding_left.replace("px", "")) > 100, padding_left
+    pg.locator('#reader-dock [data-action="layout"]').click()
+    pg.wait_for_timeout(700)
 
     # paper theme from the dock popover
     pg.locator('#reader-dock [data-action="paper"]').click()
@@ -213,6 +523,9 @@ with sync_playwright() as p:
 
     assert not errors, errors
     pg.screenshot(path=str(root / "reader-final.png"))
-    print("READER UI PASS: dock tools, styles, paper, legend, text, notes; no JS errors")
+    print(
+        "READER UI PASS: dock tools, styles, paper, legend, text, notes, "
+        "style-click applies, overlap merge, sidebar collapse, margin rails; no JS errors"
+    )
     browser.close()
 server.shutdown()

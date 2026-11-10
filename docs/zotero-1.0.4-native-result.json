@@ -1,0 +1,36 @@
+{
+  "zotero": "10.0.8",
+  "addon": {
+    "version": "1.0.4",
+    "isActive": true,
+    "isCompatible": true,
+    "appDisabled": false
+  },
+  "toolbar": {
+    "present": true,
+    "count": 1,
+    "parent": "zotero-items-toolbar",
+    "label": null,
+    "image": "jar:file:///E:/01Projects/02BabelDOC/.tmp/zotero10-isolated/extensions/babeldoc-studio@pidesign.local.xpi!/icons/icon-20.png",
+    "menuItems": [
+      {
+        "id": "babeldoc-toolbar-translate",
+        "label": "翻译",
+        "disabled": false
+      },
+      {
+        "id": "babeldoc-toolbar-read",
+        "label": "阅读",
+        "disabled": false
+      },
+      {
+        "id": "babeldoc-toolbar-library",
+        "label": "打开结果库",
+        "disabled": false
+      }
+    ]
+  },
+  "menuAPI": "function",
+  "readerAPI": "function",
+  "preferencesAPI": "function"
+}

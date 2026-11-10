@@ -1,0 +1,42 @@
+.job-monitor[hidden], .job-complete-overlay[hidden] { display: none; }
+.job-monitor {
+  position: fixed; right: 22px; bottom: 20px; z-index: 900;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 14px; width: min(330px, calc(100vw - 32px)); padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 17px; color: var(--text);
+  background: color-mix(in srgb, var(--card) 76%, transparent);
+  box-shadow: 0 14px 45px rgba(15, 18, 33, .18);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+}
+.job-monitor-copy { min-width: 0; display: grid; gap: 2px; }
+.job-monitor-copy strong { font-size: 13px; }
+.job-monitor-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-2); }
+.job-monitor-stage { font-size: 11px; color: var(--text-3); }
+.job-monitor-percent { font-size: 16px; font-variant-numeric: tabular-nums; color: var(--accent); }
+.job-monitor-track { grid-column: 1 / -1; height: 4px; overflow: hidden; border-radius: 9px; background: var(--fill-2); }
+.job-monitor-track i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--accent); transition: width .4s ease; }
+.job-monitor-link { grid-column: 1 / -1; justify-self: start; font-size: 12px; color: var(--accent); text-decoration: none; }
+.job-monitor-link:hover { text-decoration: underline; }
+.job-complete-overlay {
+  position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center;
+  padding: 20px; background: rgba(25, 27, 39, .22);
+  -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px);
+}
+.job-complete-dialog {
+  width: min(350px, 100%); padding: 27px 24px 22px; text-align: center;
+  border: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  border-radius: 21px; color: var(--text);
+  background: color-mix(in srgb, var(--card) 78%, transparent);
+  box-shadow: 0 25px 80px rgba(11, 13, 25, .25);
+  -webkit-backdrop-filter: blur(32px) saturate(165%);
+  backdrop-filter: blur(32px) saturate(165%);
+}
+.job-complete-icon { display: grid; place-items: center; margin: 0 auto 12px; width: 44px; height: 44px; border-radius: 50%; background: var(--green-soft); color: var(--green); font-size: 24px; }
+.job-complete-dialog h2 { margin: 0; font-size: 19px; }
+.job-complete-dialog p { margin: 9px 0 22px; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.job-complete-actions { display: flex; gap: 9px; }
+.job-complete-actions > * { flex: 1; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); color: var(--text); font: inherit; font-size: 13px; text-decoration: none; cursor: pointer; }
+.job-complete-actions [data-library] { border-color: var(--accent); background: var(--accent); color: #fff; }
+@media (prefers-reduced-motion: reduce) { .job-monitor-track i { transition: none; } }

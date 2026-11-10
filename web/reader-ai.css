@@ -994,8 +994,9 @@ body.r-ai-resizing .r-ai-resize::after { opacity: 0.75; }
 
 /* Task-managed dark-mode tweak: keep the amber "warn" readable on dark. */
 @media (prefers-color-scheme: dark) {
-  .r-ai-provider[data-state="warn"],
-  .r-ai-badge.warn { color: #ffb340; }
+  /* Explicit in-app light keeps the light amber, not this dark-tuned one. */
+  :root:not([data-theme="light"]) .r-ai-provider[data-state="warn"],
+  :root:not([data-theme="light"]) .r-ai-badge.warn { color: #ffb340; }
 }
 
 :root[data-theme="dark"] .r-ai-provider[data-state="warn"],

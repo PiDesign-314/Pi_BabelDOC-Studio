@@ -1,4 +1,4 @@
-"""BabelDOC Studio — local web app with an Apple HIG-style interface.
+"""ReadPI — local web app with an Apple HIG-style interface.
 
 Run ``python app.py`` to start the server and open the app window (Microsoft
 Edge app mode, Chrome fallback, browser as last resort).
@@ -42,17 +42,21 @@ from core import (  # noqa: E402
     providers,
     runner,
     toc as toc_reader,
+    zotero,
+    zotero_library,
 )
 from core.languages import LANGUAGES  # noqa: E402
 
 WEB_DIR = BASE_DIR / "web"
 
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.1"
 # The reader checks these before trusting the server with the newer annotation
-# types; a stale process keeps an old API alive and silently drops them.
+# types; a stale process keeps an old API alive and silently drops them.  The
+# Zotero add-on uses "zotero" (plus the optional features) to tell a capable
+# server from an old build.
 API_FEATURES = (
     "text", "ink", "styles", "fonts", "margin-notes", "toc", "ai-reader", "notes",
-    "notes-ai",
+    "notes-ai", "zotero", "zotero-library", "zotero-translate",
 )
 
 
@@ -271,7 +275,13 @@ def _no_cache(response):
 
 def _allowed_roots() -> list[Path]:
     roots: list[Path] = []
-    candidates = [config.UPLOAD_DIR, *[Path(item) for item in library.watched_dirs()]]
+    # PDFs opened from Zotero are copied into a managed imports folder, so the
+    # reader and the annotation API can serve them like any uploaded document.
+    candidates = [
+        config.UPLOAD_DIR,
+        zotero.imports_dir(),
+        *[Path(item) for item in library.watched_dirs()],
+    ]
     for path in candidates:
         try:
             resolved = path.expanduser().resolve()
@@ -680,6 +690,7 @@ def _normalize_job_payload(payload: dict) -> tuple[dict, list[str]]:
         "price_currency": payload.get("price_currency") or "",
         "skip_scanned": bool(payload.get("skip_scanned", False)),
         "ocr_workaround": bool(payload.get("ocr_workaround", False)),
+        "compat_first": bool(payload.get("compat_first", False)),
         "term_model": (payload.get("term_model") or "").strip(),
         "term_model_enabled": bool(payload.get("term_model_enabled", False)) and provider_id != "google_free",
         "google_free": provider_id == "google_free",
@@ -687,24 +698,40 @@ def _normalize_job_payload(payload: dict) -> tuple[dict, list[str]]:
     return cfg, files
 
 
-@app.post("/api/jobs")
-def start_job():
-    payload = request.get_json(silent=True) or {}
-    cfg, files = _normalize_job_payload(payload)
+class _JobStartError(Exception):
+    """A job start the user has to fix (mapped to a 4xx with a clear message)."""
 
+    def __init__(self, message: str, status: int = 400, code: str = "") -> None:
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.code = code
+
+
+def _start_job(payload: dict):
+    """Validate a translation request and start it.
+
+    Shared by ``POST /api/jobs`` and the Zotero ``mode: "translate"`` open, so
+    the two entry points cannot drift in what they accept or which message a
+    missing provider produces.
+    """
+    cfg, files = _normalize_job_payload(payload)
     if not files:
-        return _error("请先添加至少一个 PDF 文件")
+        raise _JobStartError("请先添加至少一个 PDF 文件")
     if not cfg["base_url"]:
-        return _error("请填写 API 地址")
+        raise _JobStartError("请填写 API 地址", code="provider_not_configured")
     if not cfg["model"]:
-        return _error("请填写模型名称")
+        raise _JobStartError("请填写模型名称", code="provider_not_configured")
     if not cfg["api_key"]:
-        return _error("请填写 API Key")
+        raise _JobStartError("请填写 API Key", code="provider_not_configured")
     if cfg["page_mode"] == "custom" and not cfg["page_range"]:
-        return _error("请输入页面范围，例如 1-5,8")
+        raise _JobStartError("请输入页面范围，例如 1-5,8")
     exe = _resolve_exe(config.public_settings())
     if not exe:
-        return _error("没有找到 babeldoc 命令，请先安装 BabelDOC（uv tool install babeldoc）")
+        raise _JobStartError(
+            "没有找到 babeldoc 命令，请先安装 BabelDOC（uv tool install babeldoc）",
+            code="provider_not_configured",
+        )
 
     # Keep earlier results visible in the library if the output folder changes.
     try:
@@ -715,9 +742,18 @@ def start_job():
         pass
 
     try:
-        job = manager.start(cfg, files, exe)
+        return manager.start(cfg, files, exe)
     except RuntimeError as exc:
-        return _error(str(exc), 409)
+        raise _JobStartError(str(exc), status=409, code="job_running") from exc
+
+
+@app.post("/api/jobs")
+def start_job():
+    payload = request.get_json(silent=True) or {}
+    try:
+        job = _start_job(payload)
+    except _JobStartError as exc:
+        return _error(exc.message, exc.status)
     return _json({"job": job.snapshot(0)})
 
 
@@ -728,6 +764,13 @@ def job_state(job_id: str):
         return _error("任务不存在", 404)
     cursor = int(request.args.get("cursor") or 0)
     return _json(job.snapshot(cursor))
+
+
+@app.get("/api/jobs/current")
+def current_job_state():
+    """Small status snapshot for the library and reader's progress indicator."""
+    job = manager.current
+    return _json({"job": job.snapshot(job.seq) if job else None})
 
 
 @app.post("/api/jobs/<job_id>/cancel")
@@ -1235,6 +1278,290 @@ def notes_ai_polish():
 
 
 # --------------------------------------------------------------------------- #
+# Zotero bridge (Zotero add-on -> local reader)
+# --------------------------------------------------------------------------- #
+def _zotero_payload() -> dict:
+    payload = request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _zotero_local_only():
+    """The add-on is a local process; never expose file paths beyond loopback."""
+    if request.remote_addr not in {"127.0.0.1", "::1"}:
+        return _error("仅本机可用", 403)
+    return None
+
+
+def _viewer_url(path: str, page: int = 0, pages: int = 0, origin: str = "zotero") -> str:
+    query = {"path": path, "from": origin}
+    if page:
+        query["page"] = int(page)
+    if pages:
+        query["pages"] = int(pages)
+    return "/viewer?" + urllib.parse.urlencode(query)
+
+
+def _request_port() -> str:
+    port = request.host.rsplit(":", 1)[-1] if ":" in request.host else "8765"
+    return port if port.isdigit() else "8765"
+
+
+def _open_app_window(url: str, size: str = "1240,960") -> None:
+    """Open a local app window for a URL an endpoint just returned."""
+    absolute = f"http://127.0.0.1:{_request_port()}{url}"
+    threading.Timer(0.15, lambda: _open_window(absolute, size)).start()
+
+
+def _open_reader_window(url: str) -> None:
+    """Open a dedicated app window for a Zotero-requested document."""
+    _open_app_window(url, "1440,1000")
+
+
+def _same_file(left: str, right: str) -> bool:
+    try:
+        return os.path.normcase(os.path.abspath(str(left))) == os.path.normcase(
+            os.path.abspath(str(right))
+        )
+    except (OSError, ValueError):
+        return False
+
+
+TRANSLATE_NOT_CONFIGURED = "请先在 ReadPI 中配置翻译服务（API Key）"
+
+
+@app.post("/api/zotero/open")
+def zotero_open():
+    """Import a Zotero attachment (once), then read it, prepare or translate it."""
+    denied = _zotero_local_only()
+    if denied:
+        return denied
+    payload = _zotero_payload()
+    mode = str(payload.get("mode") or "read").strip().lower()
+    if mode == "prepare":
+        return _zotero_prepare(payload)
+    if mode == "translate":
+        return _zotero_translate(payload)
+    if mode != "read":
+        return _error("不支持的模式，请使用 read、prepare 或 translate", 400)
+    try:
+        result = zotero.open_link(payload)
+    except zotero.ZoteroError as exc:
+        return _json(exc.payload(), exc.status)
+    result["url"] = _viewer_url(
+        result["path"], result.get("page") or 1, result.get("pages") or 0
+    )
+    if payload.get("open_window", True) is not False:
+        _open_reader_window(result["url"])
+    return _json(result)
+
+
+def _zotero_prepare(payload: dict):
+    """Import the attachment and hand the library page a translation draft.
+
+    The library's 翻译 button must open the translation page with the PDF
+    already loaded so the user can check the settings and press start himself,
+    so this mode never starts a job and never needs a provider configuration.
+    """
+    try:
+        record, _copied = zotero.import_attachment(payload)
+    except zotero.ZoteroError as exc:
+        return _json(exc.payload(), exc.status)
+    link_id = str(record.get("id") or "")
+    imported_path = str(record.get("imported_path") or "")
+    title = record.get("title") or Path(imported_path).stem
+    url = "/?prepare=" + urllib.parse.quote(imported_path, safe="")
+    if payload.get("open_window") is True:
+        _open_app_window(url)
+    return _json(
+        {
+            "ok": True,
+            "mode": "prepare",
+            "link_id": link_id,
+            "path": imported_path,
+            "title": title,
+            "url": url,
+        }
+    )
+
+
+def _zotero_translate(payload: dict):
+    """Import the attachment, then translate it with the app's saved settings."""
+    try:
+        record, _copied = zotero.import_attachment(payload)
+    except zotero.ZoteroError as exc:
+        return _json(exc.payload(), exc.status)
+    link_id = str(record.get("id") or "")
+    imported_path = str(record.get("imported_path") or "")
+    title = record.get("title") or Path(imported_path).stem
+
+    # Reuse the running job when it is already translating this very file: the
+    # user double-clicked, or Zotero retried; a second job would be refused.
+    current = manager.current
+    if current is not None and current.status in {"queued", "running"}:
+        if any(_same_file(path, imported_path) for path in current.files):
+            return _json(
+                {
+                    "ok": True,
+                    "mode": "translate",
+                    "link_id": link_id,
+                    "job_id": current.id,
+                    "url": f"/?job={current.id}",
+                    "title": title,
+                    "already_running": True,
+                    "message": f"已有翻译任务在运行：{title}",
+                }
+            )
+        return _error("已有翻译任务在运行，请先等待完成或取消。", 409)
+
+    try:
+        # Saved settings first, exactly like the home page's "开始翻译"; no
+        # half-started job when the provider is not configured yet.
+        job = _start_job({**config.public_settings(), "files": [imported_path]})
+    except _JobStartError as exc:
+        if exc.code == "provider_not_configured":
+            return _json(
+                {
+                    "ok": False,
+                    "error": TRANSLATE_NOT_CONFIGURED,
+                    "code": "provider_not_configured",
+                },
+                400,
+            )
+        return _json(
+            {"ok": False, "error": exc.message, "code": exc.code or "job_error"},
+            exc.status,
+        )
+
+    url = f"/?job={job.id}"
+    if payload.get("open_window", True) is not False:
+        _open_app_window(url)
+    return _json(
+        {
+            "ok": True,
+            "mode": "translate",
+            "link_id": link_id,
+            "job_id": job.id,
+            "url": url,
+            "title": title,
+            "already_running": False,
+            "message": f"已开始翻译：{title}",
+        }
+    )
+
+
+@app.post("/api/zotero/position")
+def zotero_position():
+    """The reader reports where it is, so Zotero can resume there later."""
+    denied = _zotero_local_only()
+    if denied:
+        return denied
+    payload = _zotero_payload()
+    target = _allowed_file(payload.get("path", ""), (".pdf",))
+    if not target:
+        return _error("文件不可用", 404)
+    try:
+        summary = zotero.report_position(
+            target, payload.get("page"), payload.get("pages")
+        )
+    except zotero.ZoteroError as exc:
+        return _json(exc.payload(), exc.status)
+    return _json({"ok": bool(summary), "link": summary})
+
+
+@app.get("/api/zotero/status")
+def zotero_status():
+    denied = _zotero_local_only()
+    if denied:
+        return denied
+    try:
+        return _json(zotero.status())
+    except zotero.ZoteroError as exc:
+        return _json(exc.payload(), exc.status)
+
+
+@app.post("/api/zotero/library")
+def zotero_library_push():
+    """Store the add-on's Zotero library snapshot (collections + papers)."""
+    denied = _zotero_local_only()
+    if denied:
+        return denied
+    try:
+        return _json(zotero_library.store(_zotero_payload()))
+    except zotero.ZoteroError as exc:
+        return _json(exc.payload(), exc.status)
+
+
+@app.get("/api/zotero/library")
+def zotero_library_view():
+    """The Zotero collection tree joined with BabelDOC's reading state."""
+    denied = _zotero_local_only()
+    if denied:
+        return denied
+    try:
+        return _json(zotero_library.payload())
+    except zotero.ZoteroError as exc:
+        return _json(exc.payload(), exc.status)
+
+
+@app.get("/api/zotero/thumb")
+def zotero_thumb():
+    """Thumbnail for a Zotero item; only paths the stored snapshot names."""
+    denied = _zotero_local_only()
+    if denied:
+        return denied
+    try:
+        width = max(120, min(1200, int(request.args.get("w") or 420)))
+    except ValueError:
+        width = 420
+    target = zotero_library.attachment_path(
+        request.args.get("library_id"),
+        request.args.get("item_key"),
+        request.args.get("attachment_key"),
+    )
+    if target is None or not target.is_file():
+        return _error("文件不可用", 404)
+    data = library.thumbnail(target, width)
+    if not data:
+        return _error("无法生成缩略图", 404)
+    response = Response(data, mimetype="image/png")
+    response.headers["Cache-Control"] = "private, max-age=600"
+    return response
+
+
+@app.post("/api/zotero/panel")
+def zotero_panel():
+    """Open an app window on ``/`` or ``/library`` (Zotero toolbar → 结果库)."""
+    denied = _zotero_local_only()
+    if denied:
+        return denied
+    payload = _zotero_payload()
+    route = str(payload.get("route") or "library").strip()
+    if route == "library":
+        route = "/library?source=zotero"
+    if route not in {"/", "/library", "/library?source=zotero"}:
+        return _error("不支持的页面，请使用 / 或 /library", 400)
+    if payload.get("open_window", True) is not False:
+        _open_app_window(route)
+    return _json({"ok": True, "route": route})
+
+
+@app.get("/api/zotero/plugin.xpi")
+def zotero_plugin_xpi():
+    """Serve the add-on as an installable XPI (Zotero opens the MIME type)."""
+    denied = _zotero_local_only()
+    if denied:
+        return denied
+    try:
+        data, name = zotero.build_plugin_xpi()
+    except zotero.ZoteroError as exc:
+        return _json(exc.payload(), exc.status)
+    response = Response(data, mimetype="application/x-xpinstall")
+    response.headers["Content-Disposition"] = f'attachment; filename="{name}"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+# --------------------------------------------------------------------------- #
 # Launcher
 # --------------------------------------------------------------------------- #
 def _free_port(preferred: int = 8765) -> int:
@@ -1251,7 +1578,7 @@ def _free_port(preferred: int = 8765) -> int:
         return sock.getsockname()[1]
 
 
-def _open_window(url: str) -> None:
+def _open_window(url: str, size: str = "1240,960") -> None:
     candidates = [
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
@@ -1262,7 +1589,7 @@ def _open_window(url: str) -> None:
         if Path(exe).exists():
             try:
                 subprocess.Popen(
-                    [exe, f"--app={url}", "--window-size=1240,960", "--disable-features=Translate"],
+                    [exe, f"--app={url}", f"--window-size={size}", "--disable-features=Translate"],
                 )
                 return
             except OSError:
@@ -1316,11 +1643,17 @@ def main() -> None:
     config.ensure_dirs()
     port = _free_port(port)
     url = f"http://127.0.0.1:{port}/"
+    # The Zotero add-on discovers this file to start the app when it is closed;
+    # a failure must never stop the server (read-only profile etc.).
+    try:
+        zotero.write_launch_info(port, APP_VERSION)
+    except Exception:
+        pass
 
     from werkzeug.serving import make_server
 
     server = make_server("127.0.0.1", port, app, threaded=True)
-    print(f"BabelDOC Studio running at {url}", flush=True)
+    print(f"ReadPI running at {url}", flush=True)
     if not server_only:
         threading.Timer(0.8, lambda: _open_window(url)).start()
     try:

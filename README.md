@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="web/babeldoc-icon.png" width="132" alt="BabelDOC Studio"/>
+<img src="web/babeldoc-icon.png" width="132" alt="ReadPI"/>
 
-<h2>BabelDOC Studio</h2>
+<h2>ReadPI</h2>
 
 <p><strong>把 PDF 论文翻成双语，同时保留公式、图表和原始排版。</strong></p>
 
@@ -19,14 +19,16 @@
 
 </div>
 
-BabelDOC Studio 是一个面向 **PDF 论文 / 技术文档** 的本地翻译工作台。底层调用
+ReadPI 是一个面向 **PDF 论文 / 技术文档** 的本地翻译工作台。底层调用
 [BabelDOC](https://github.com/funstory-ai/BabelDOC) 完成版面分析与重排，上层是本项目自研的
 **Apple HIG 风格界面**、PDF.js 阅读器和批注系统。
 
 - **免安装版**：Windows x64 ZIP，内置 Python、BabelDOC、离线模型与字体，解压即用。
 - **本地优先**：Flask 本地服务 + Edge 应用窗口；PDF、批注和 API Key 都留在本机，Key 使用 Windows DPAPI 加密。
 - **任意 OpenAI 兼容模型**：DeepSeek、智谱 GLM、Google Gemini、OpenRouter、Ollama、自定义网关；另有内置 Google 免费翻译。
-- **完整的阅读与批注**：左右双语、八色高亮、手绘样式、便签、页面文字、页边距批注、术语库与结果库。
+- **完整的阅读与批注**：左右双语、八色高亮（可自定义重点色）、手绘样式、便签、页面文字、页边距批注、术语库与结果库。
+- **Zotero 一键阅读**：在 Zotero 文献列表右键或 PDF 阅读器里点「在 ReadPI 中阅读」，自动接入 PDF
+  并定位到当前页；重复打开复用已有译文、笔记、批注与阅读进度。
 - **AI 助读**：选中原文右键引用提问，先用模型自己的知识解释，再用 `p.N` 标出论文依据，点一下就回到原文；默认直接调用本机已登录的 Codex / Kimi / Claude CLI，无需 API Key。右侧对话区采用「用户浅色气泡 + AI 阅读卡片」的双层结构，底部是 Claude 风格的圆角输入区：支持上传 / 拖拽 / 粘贴图片（最多 4 张，带缩略图预览）、Enter 发送、Shift+Enter 换行，生成中可以随时停止。
 - **笔记系统**：划词、AI 回答或手动新建都能存成笔记；手写笔记默认是**独立笔记**，需要时再关联到原文的某页或某段选中文字，来源信息单独显示、可随时修改或解除关联。独立的悬浮窗口不挤占论文阅读区，左侧列表可收起进入专注编辑，窗口可拖动、八向拉伸、最小化与恢复，像 Word 一样用工具栏排版（标题、加粗、重点高亮、待办列表），自动保存并支持导出 Markdown / HTML；结果库按来源文献与自定义分类整理，点击回到原文。
 - **AI 帮写**：笔记工具栏里的 ✦ AI 帮写可以润色、学术化、精简、扩展、整理结构、纠正语病，或按自定义要求改写选中内容 / 整篇笔记（范围可切换）；结果先以建议形式展示对比，确认后才写入正文，并可一键撤销。模型沿用 AI 助读的配置，不会在后台上传笔记。
@@ -47,7 +49,7 @@ BabelDOC Studio 是一个面向 **PDF 论文 / 技术文档** 的本地翻译工
 ## 界面预览
 
 <div align="center">
-  <img src="docs/screenshots/home-light.png" width="88%" alt="BabelDOC Studio 首页"/>
+  <img src="docs/screenshots/home-light.png" width="88%" alt="ReadPI 首页"/>
 </div>
 
 > 演示截图使用公开论文 **GPT-4 Technical Report**（arXiv:2303.08774），不包含任何用户个人文档；
@@ -186,10 +188,14 @@ python app.py --server-only   # 只启动本地服务，用浏览器访问 http:
 内置 PDF.js 阅读器，打开译文或双语 PDF 即可阅读和标注：
 
 - **双语同步**：在左右对照 PDF 的任意一侧划词，另一侧对应段落会同步亮起；对应关系按版面位置估算，不保证逐词对齐。
-- **八色高亮与六种样式**：荧光笔、蜡笔、手绘、实线划掉、铅笔划掉、波浪线；已有标记可原地改样式和颜色。
+- **八色高亮与六种样式**：荧光笔、蜡笔、手绘下划线、实线划掉、铅笔划掉、波浪线；手绘下划线在批注编辑器里可切
+  轻微 / 自然 / 明显三档笔触；已有标记可原地改样式和颜色。
 - **便签与页面文字**：便签可拖动；页面文字直接在页面上输入，拖动左上把手移动、右下把手缩放字号。
-- **页边距批注**：批注可以显示在页面内，也可以排到页面右侧，并用引线连回被批注的句子。
+- **页边距批注**：批注可以显示在页面内，也可以排到页面右侧，并用圆角正交引线连回被批注的句子。
+- **颜色标签可管理**：颜色标签支持新增（可自选颜色）、删除和拖拽排序，自动保存；删除标签不会删除已有批注。
+  划词后工具条末尾的「＋」可以直接挑一个颜色、创建标签并立即高亮，不用先离开选区。
 - **纸面与水墨屏**：原色、暖纸、浅绿、雾蓝、浅粉、水墨屏等纸面；水墨屏只把页面转灰，批注颜色保持原样。
+- **反色阅读**：一键把 PDF 页面切成深色背景、浅色文字，仅改变显示，不修改文件也不影响导出；开关状态会记住。
 - **导出**：批注自动保存在本机，可导出 Markdown，或导出带标准 PDF 注释的副本（`Ctrl+S`）。
 
 <div align="center">
@@ -199,6 +205,26 @@ python app.py --server-only   # 只启动本地服务，用浏览器访问 http:
 <div align="center">
   <img src="docs/screenshots/reader-margin-gpt4.png" width="88%" alt="页边距批注"/>
 </div>
+
+### Zotero 集成
+
+运行 ReadPI 1.8.1，在「翻译设置 → Zotero 集成」下载并安装[插件 1.0.6](dist/babeldoc-zotero-1.0.6.xpi) 后，
+Zotero 顶部 ReadPI 图标提供「翻译 / 阅读 / 打开结果库」；原有的右键阅读入口也保留。
+
+- **入口**：文献列表右键、PDF 阅读器工具栏按钮、阅读器页面右键；只对本地 PDF 附件显示。
+- **直接翻译**：用 Studio 已保存的设置启动所选 PDF 的翻译任务，打开进度页。
+- **Zotero 文库**：结果库显示 Zotero 嵌套文件夹和带本地 PDF 的文献，可搜索、阅读或翻译；插件自动同步只读快照。
+- **版本检查**：插件优先连接支持 Zotero 接口的新版 Studio；检测到占用端口的旧版会给出明确提示。
+- **自动接入**：首次打开会把 PDF 复制到应用的数据目录（不改动 Zotero 原件），并建立与文献、附件的关联；
+  不需要导出或再次上传。应用没启动时会自动启动或引导启动。
+- **不重复、不丢成果**：同一附件按 `libraryID + itemKey + attachmentKey` 关联（内容哈希兜底），
+  重复打开复用同一条记录，译文、笔记、批注和阅读位置都保留。
+- **位置衔接**：从阅读器发起定位到当前页；从列表发起恢复上次读到的页。译文/双语按页映射，
+  无法准确对应时回退到原文对应页。
+- **安装**：在「翻译设置 → Zotero 集成」里下载插件，Zotero → 工具 → 插件 → 从文件安装。
+  完整说明与排查见 [docs/ZOTERO-INTEGRATION.md](docs/ZOTERO-INTEGRATION.md)。
+
+Zotero 文库快照是单向只读同步；Studio 不会编辑 Zotero 的文献、文件夹或原 PDF。
 
 ### AI 助读与自动目录
 
@@ -264,6 +290,7 @@ python app.py --server-only   # 只启动本地服务，用浏览器访问 http:
 | 术语库 | `%APPDATA%\BabelDOC-Studio\glossaries\*.csv` |
 | 阅读批注 | `%APPDATA%\BabelDOC-Studio\annotations\<文档>.json` |
 | 拖拽上传的临时 PDF | `%APPDATA%\BabelDOC-Studio\uploads\` |
+| Zotero 接入的 PDF 与关联记录 | `%APPDATA%\BabelDOC-Studio\zotero\` |
 | 结果库附加目录与合集 | `%APPDATA%\BabelDOC-Studio\library.json` |
 | 默认输出目录 | `%USERPROFILE%\Documents\BabelDOC-Studio` |
 
@@ -296,6 +323,13 @@ Google 免费接口可能返回 429 限流，也可能因为网络无法访问�
 通常是应用窗口仍连着旧的后端进程（例如更新后没有重启）。阅读器顶部会出现「重启应用」提示条，
 点一下会自动重启并刷新。仍失败时请检查 `%APPDATA%\BabelDOC-Studio` 是否可写。
 
+### Zotero 里没有「在 ReadPI 中阅读」？
+
+确认三件事：Zotero 版本是 7.0 及以上；「工具 → 插件」里的 **ReadPI** 已启用；
+右键的是**有本地 PDF 附件**的文献（只有网址或还没下载附件的条目不会显示入口）。
+插件可在「翻译设置 → Zotero 集成」里重新下载，安装说明和异常排查见
+[docs/ZOTERO-INTEGRATION.md](docs/ZOTERO-INTEGRATION.md)。
+
 ### 支持 macOS / Linux 吗？
 
 当前发布包只提供 Windows 10/11 x64。源码理论上可以在其他桌面系统运行，但字体列表、
@@ -317,7 +351,7 @@ Google 免费接口可能返回 429 限流，也可能因为网络无法访问�
 CLI / Python API；普通读者要完成一次舒服的论文翻译，还需要自己准备运行环境、模型 Key、术语表，
 再找外部阅读器查看译文和做批注。
 
-BabelDOC Studio 把这条链路收进一个本地桌面应用：
+ReadPI 把这条链路收进一个本地桌面应用：
 
 - 用本地 Flask 服务封装 BabelDOC，提供可视化任务、阶段进度、产物归档和费用统计；
 - 内置 PDF.js 阅读器，把「翻译 → 对照阅读 → 高亮/便签/页边距批注 → 导出」放在同一个窗口；
@@ -406,6 +440,15 @@ python -m pytest -q
 # 阅读器 UI 冒烟（Playwright + Edge）
 python tests/reader_ui_smoke.py
 
+# 划词选区绘制回归（连续色带 / 无叠色 / 预览与高亮一致）
+python tests/selection_paint_ui.py
+
+# 标记样式 / 颜色标签 / 页边距引线 / 反色阅读（Playwright + Edge）
+python tests/style_tools_ui.py
+python tests/color_tags_ui.py
+python tests/leader_lines_ui.py
+python tests/reverse_reading_ui.py
+
 # AI 助读 + 自动目录 UI 冒烟（Playwright + Edge）
 python tests/reader_ai_toc_ui.py
 
@@ -437,6 +480,7 @@ python tools/build_portable.py --sign
 ```powershell
 python -m pytest -q
 python tests/reader_ui_smoke.py
+python tests/selection_paint_ui.py
 ```
 
 请不要把 `dist/`、`papers/`、`.tmp/`、个人 API Key 或论文 PDF 提交到仓库。

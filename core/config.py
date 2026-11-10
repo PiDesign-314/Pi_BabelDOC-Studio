@@ -46,6 +46,9 @@ DEFAULTS: dict = {
     "price_currency": "",
     "skip_scanned": False,
     "ocr_workaround": False,
+    # Long/rich-text-heavy papers sometimes produce large blank translated
+    # areas; this passes --disable-rich-text-translate to BabelDOC.
+    "compat_first": False,
     "term_model": "",
     "term_model_enabled": False,
     "ai": {

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "ReadPI",
+  "version": "1.0.6",
+  "description": "在 ReadPI 中翻译或阅读 Zotero PDF，并在结果库查看 Zotero 文库。",
+  "author": "PiDesign",
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png"
+  },
+  "applications": {
+    "zotero": {
+      "id": "babeldoc-studio@pidesign.local",
+      "update_url": "https://raw.githubusercontent.com/PiDesign-314/Pi_BabelDOC-Studio/main/tools/zotero-plugin/updates.json",
+      "strict_min_version": "7.0",
+      "strict_max_version": "10.*"
+    }
+  }
+}

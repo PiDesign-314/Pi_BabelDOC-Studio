@@ -18,5 +18,6 @@ Thumbs.db
 desktop.ini
 .DS_Store
 
-dist/
+dist/*
+!dist/babeldoc-zotero-1.0.6.xpi
 runtime/

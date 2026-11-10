@@ -1,0 +1,83 @@
+/* ------------------------------------------------------------------ *
+ *  反色阅读 — invert the PDF page display for night reading
+ * ------------------------------------------------------------------ *
+ *
+ * Scope: the page stack only (`.r-sheet > .r-page`: page canvas, transparent
+ * text layer, selection bands, ghost bands, mark / hand-underline / ink
+ * overlays).  The reader chrome, sidebars, notes drawer, margin cards, the
+ * app theme (#btn-theme) and every other page stay exactly as they are.
+ *
+ * Display-only: this file contains no code that writes to the PDF, the
+ * annotation store or an export — it is a CSS filter on a rendered view.
+ *
+ * One filter on the page element inverts the whole stack as a unit, so the
+ * page's internal contrast relationships are preserved instead of being
+ * recomputed per layer: dark glyphs become light, white paper becomes dark,
+ * and overlays are inverted together with the page image.  hue-rotate(180deg)
+ * undoes the complementary-hue shift of a bare invert() so red ink stays red,
+ * the yellow marker stays yellowish, etc.
+ */
+
+html.invert-reading .r-sheet > .r-page {
+  filter: invert(1) hue-rotate(180deg);
+  /* The drop shadow is part of the filtered rendering.  A faint white shadow
+     is what becomes a faint dark shadow after the inversion; the original
+     dark shadow would invert into a glowing white halo. */
+  box-shadow: 0 2px 6px rgba(255, 255, 255, 0.1),
+    0 18px 44px -24px rgba(255, 255, 255, 0.42);
+}
+
+/* ------------------------------------------------------------------ *
+ *  Overlay tuning inside the filtered page
+ * ------------------------------------------------------------------ *
+ *
+ * The overlays are inverted together with the page, which is what keeps their
+ * text-vs-band geometry intact, but two of them are pale colours designed to
+ * sit on white paper and would invert into near-black:
+ *
+ *  - marker/crayon bands and the underline styles are pale (#ffe268, #aeeac0,
+ *    …, multiplied onto the white paper): inverting a pale band yields a dark
+ *    brown/olive band on an already dark page, i.e. the highlight would all
+ *    but disappear.  Darkening the mark *before* it multiplies keeps its hue
+ *    while moving it into the readable middle of the dark page, so the band
+ *    stays a clearly visible tint and the light glyphs on it keep contrast.
+ *  - the selection band is a 26% blue that becomes a near-black navy.  The
+ *    replacement colour below is the pre-image of a mid blue in the filtered
+ *    result (see the measurements in the change report).
+ */
+
+html.invert-reading .r-mark {
+  /* 0.72 is measured: bands land around 0.12–0.15 relative luminance, which
+     is ~3.4–4:1 against the inverted page while light text on the band keeps
+     ~6:1 (>= 4.5:1).  Each palette keeps its own hue. */
+  filter: brightness(0.72);
+}
+
+html.invert-reading .r-select .r-pick {
+  /* Pre-image of ~rgb(60,100,181) after invert(1) hue-rotate(180deg):
+     ~3.6:1 against the dark page; selected glyphs stay light (~5.8:1). */
+  background: rgba(30, 97, 232, 0.6);
+}
+
+html.invert-reading .r-ghost .r-sync {
+  /* The softer counterpart band on a side-by-side dual page. */
+  background: rgba(63, 123, 243, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+/* ------------------------------------------------------------------ *
+ *  The top-bar toggle (same 32px round icon button as #btn-theme)
+ * ------------------------------------------------------------------ */
+
+#btn-invert {
+  flex: none;
+}
+#btn-invert.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+#btn-invert.on:hover {
+  border-color: var(--accent);
+  background: var(--accent-ring);
+}

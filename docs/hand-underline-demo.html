@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>手绘下划线 · BabelDOC Studio</title>
+<link rel="icon" href="../web/favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #f2f2f7;
+    --card: #ffffff;
+    --card-soft: #fbfbfd;
+    --text: #1d1d1f;
+    --text-2: #5b5b60;
+    --text-3: #86868b;
+    --line: #e6e6eb;
+    --line-strong: #d8d8de;
+    --accent: #ff375f;
+    --accent-soft: rgba(255, 55, 95, 0.1);
+    --ink: #c2455a;
+    --green: #2f9e54;
+    --fill-1: rgba(120, 120, 128, 0.12);
+    --radius-lg: 18px;
+    --shadow-card: 0 1px 2px rgba(17, 17, 26, 0.03), 0 12px 34px -26px rgba(17, 17, 26, 0.36);
+    --font: -apple-system, "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text",
+      "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    min-height: 100vh;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    background:
+      radial-gradient(1100px 520px at 18% -12%, rgba(255, 255, 255, 0.9), transparent 62%),
+      radial-gradient(900px 500px at 100% 0%, rgba(255, 55, 95, 0.045), transparent 58%),
+      var(--bg);
+  }
+
+  ::selection { background: rgba(255, 55, 95, 0.16); }
+
+  .page {
+    width: 100%;
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 40px 32px 52px;
+  }
+
+  /* ------------------------------------------------------------- hero -- */
+  .hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 28px;
+  }
+
+  .eyebrow {
+    margin: 0 0 5px;
+    color: var(--text-3);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.15;
+  }
+
+  .lede {
+    margin: 10px 0 0;
+    max-width: 720px;
+    color: var(--text-2);
+    font-size: 14.5px;
+    line-height: 1.65;
+  }
+
+  .hero-side {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 9px;
+    padding-top: 6px;
+  }
+
+  .btn-primary {
+    appearance: none;
+    border: 0;
+    border-radius: 10px;
+    padding: 9px 17px;
+    background: var(--accent);
+    color: #fff;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(255, 55, 95, 0.24), 0 8px 22px -14px rgba(255, 55, 95, 0.65);
+    transition: background 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+  }
+
+  .btn-primary:hover { background: #ef2d55; }
+  .btn-primary:active { transform: scale(0.97); }
+  .btn-primary:focus-visible { outline: 2px solid rgba(255, 55, 95, 0.5); outline-offset: 2px; }
+
+  .status {
+    margin: 0;
+    min-height: 15px;
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.01em;
+  }
+
+  .status.ok { color: var(--green); }
+
+  /* ----------------------------------------------------------- legend -- */
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px 22px;
+    margin-top: 24px;
+    padding: 13px 18px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(8px);
+  }
+
+  .legend-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    min-width: 0;
+  }
+
+  .legend-key {
+    color: var(--text-3);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+  }
+
+  .legend-value {
+    color: var(--text);
+    font-size: 12px;
+  }
+
+  .legend-note {
+    width: 100%;
+    color: var(--text-3);
+    font-size: 10.5px;
+  }
+
+  .matrix-note {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 18px 2px 0;
+    color: var(--text-3);
+    font-size: 11px;
+    letter-spacing: 0.01em;
+  }
+
+  .matrix-note b {
+    color: var(--text-2);
+    font-weight: 600;
+  }
+
+  /* ----------------------------------------------------------- matrix -- */
+  .matrix {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+    margin-top: 10px;
+    align-items: stretch;
+  }
+
+  .preset {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 20px 22px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .preset[data-preset="hand-natural"] {
+    border-color: rgba(255, 55, 95, 0.3);
+    box-shadow:
+      0 0 0 3px rgba(255, 55, 95, 0.055),
+      0 1px 2px rgba(17, 17, 26, 0.03),
+      0 16px 40px -26px rgba(255, 55, 95, 0.45);
+  }
+
+  .preset-head { min-height: 92px; }
+
+  .preset-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .preset-title h2 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -0.012em;
+  }
+
+  .swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ink);
+    box-shadow: 0 0 0 3px rgba(194, 69, 90, 0.1);
+  }
+
+  .swatch[data-level="soft"] { opacity: 0.55; }
+  .swatch[data-level="strong"] { transform: scale(1.18); }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--fill-1);
+    color: var(--text-2);
+    font-family: var(--mono);
+    font-size: 10px;
+    line-height: 16px;
+  }
+
+  .chip-default {
+    background: var(--accent-soft);
+    color: #d21f48;
+    font-family: var(--font);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .preset-desc {
+    margin: 7px 0 0;
+    min-height: 34px;
+    color: var(--text-3);
+    font-size: 11.5px;
+    line-height: 1.55;
+  }
+
+  .preset-spec {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    margin: 8px 0 0;
+    padding: 0;
+  }
+
+  .preset-spec div { display: flex; align-items: baseline; gap: 5px; }
+
+  .preset-spec dt {
+    color: var(--text-3);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+
+  .preset-spec dd {
+    margin: 0;
+    color: var(--text-2);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  /* ----------------------------------------------------------- samples -- */
+  .sample {
+    padding: 13px 0 9px;
+    border-top: 1px solid var(--line);
+  }
+
+  .sample-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 5px;
+    color: var(--text-3);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+
+  .sample-label span {
+    color: #b9b9c0;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+
+  .sample-text {
+    margin: 0;
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.42;
+    white-space: nowrap;
+  }
+
+  .sample-lines .sample-text + .sample-text { margin-top: 3px; }
+
+  .line {
+    position: relative;
+    display: inline-block;
+    padding-bottom: 8px;
+  }
+
+  .line > svg.hand-underline {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+    color: var(--ink);
+  }
+
+  /* ---------------------------------------------------------- longline -- */
+  .longline {
+    margin-top: 22px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: var(--card);
+    box-shadow: var(--shadow-card);
+  }
+
+  .section-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 20px 24px 4px;
+  }
+
+  .section-head h2 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -0.012em;
+  }
+
+  .section-head p {
+    margin: 5px 0 0;
+    color: var(--text-3);
+    font-size: 11.5px;
+    line-height: 1.55;
+  }
+
+  .long-rows { padding: 6px 26px 18px; }
+
+  .long-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 9px 0;
+  }
+
+  .long-row + .long-row { border-top: 1px solid var(--line); }
+
+  .long-tag {
+    flex: 0 0 54px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-top: 3px;
+    color: var(--text-3);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .long-tag::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ink);
+    opacity: 0.65;
+  }
+
+  .long-tag[data-level="soft"]::before { opacity: 0.4; }
+  .long-tag[data-level="strong"]::before { transform: scale(1.25); }
+
+  .line.long-line {
+    font-size: 15px;
+    line-height: 1.42;
+    white-space: nowrap;
+  }
+
+  /* ------------------------------------------------------------- foot -- */
+  .foot {
+    margin-top: 22px;
+    color: var(--text-3);
+    font-size: 11.5px;
+    line-height: 1.75;
+  }
+
+  .foot p { margin: 0; }
+
+  .foot code {
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: var(--fill-1);
+    color: var(--text-2);
+    font-family: var(--mono);
+    font-size: 10.5px;
+  }
+
+  @media (max-width: 1279px) {
+    .hero { flex-direction: column; }
+    .hero-side { align-items: flex-start; }
+    .matrix { grid-template-columns: 1fr; }
+    .preset-head { min-height: 0; }
+    /* the long sample stays on one line; scroll inside the card instead of
+       wrapping, so every visual line keeps its own underline */
+    .long-rows { overflow-x: auto; }
+  }
+
+  @media (max-width: 700px) {
+    .page { padding: 28px 20px 40px; }
+    .legend { grid-template-columns: 1fr; }
+    .sample-text, .line.long-line { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">BABELDOC STUDIO · 阅读器标注</p>
+      <h1>手绘下划线</h1>
+      <p class="lede">
+        三档笔触，按同一组真实文本并排对照。线条的位置与起伏由「标注 id + 行号」确定性生成：
+        重绘、刷新、缩放或翻页之后，同一条标注始终保持同一笔迹。
+      </p>
+    </div>
+    <div class="hero-side">
+      <button id="redraw" class="btn-primary" type="button">重新绘制</button>
+      <p id="status" class="status" role="status" aria-live="polite">路径指纹 —</p>
+    </div>
+  </header>
+
+  <section class="legend" aria-label="参数说明">
+    <div class="legend-item">
+      <span class="legend-key">幅度</span><span class="legend-value">行高的 6% · 10% · 16%</span>
+      <span class="legend-note">只跟行高有关，不随行宽放大</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-key">笔宽</span><span class="legend-value">1.6 · 2.0 · 2.4 px</span>
+      <span class="legend-note">以 20px 行高为基准平滑缩放</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-key">笔触</span><span class="legend-value">圆头线帽 + 淡二次笔迹</span>
+      <span class="legend-note">起收笔略微越界，不提笔回锋</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-key">种子</span><span class="legend-value">FNV-1a(id) ⊕ 行号</span>
+      <span class="legend-note">LCG 取点，重绘不产生新形状</span>
+    </div>
+  </section>
+
+  <p class="matrix-note">
+    <span>同一文本 · 同一种子 · 仅切换笔触预设，便于横向比较</span>
+    <span>默认样式：<b>自然手绘 hand-natural</b></span>
+  </p>
+
+  <section class="matrix" aria-label="三档预设对比">
+
+    <!-- ------------------------------------------------- 轻微手绘 -- -->
+    <article class="preset" data-preset="hand-soft">
+      <header class="preset-head">
+        <div class="preset-title">
+          <span class="swatch" data-level="soft"></span>
+          <h2>轻微手绘</h2>
+          <span class="chip">hand-soft</span>
+        </div>
+        <p class="preset-desc">几乎贴住正文，只留一点笔意；适合成段正文。</p>
+        <dl class="preset-spec">
+          <div><dt>幅度</dt><dd>0.06</dd></div>
+          <div><dt>笔宽</dt><dd>1.6 px</dd></div>
+          <div><dt>控制点</dt><dd>3</dd></div>
+        </dl>
+      </header>
+
+      <div class="sample" data-sample="short" data-seed="demo-short">
+        <p class="sample-label"><span>01</span>短句</p>
+        <p class="sample-text"><span class="line" data-line="0">确定性，让手绘始终如一。</span></p>
+      </div>
+
+      <div class="sample" data-sample="long" data-seed="demo-long">
+        <p class="sample-label"><span>02</span>长句</p>
+        <p class="sample-text"><span class="line" data-line="0">同一处标注在重绘、缩放与翻页之后都应保持一致。</span></p>
+      </div>
+
+      <div class="sample" data-sample="cross" data-seed="demo-cross">
+        <p class="sample-label"><span>03</span>跨行</p>
+        <div class="sample-lines">
+          <p class="sample-text"><span class="line" data-line="0">跨行的标注按行分别绘制，</span></p>
+          <p class="sample-text"><span class="line" data-line="1">每一行都拥有自己的种子与笔迹。</span></p>
+        </div>
+      </div>
+    </article>
+
+    <!-- ------------------------------------------------ 自然手绘（默认） -- -->
+    <article class="preset" data-preset="hand-natural">
+      <header class="preset-head">
+        <div class="preset-title">
+          <span class="swatch" data-level="natural"></span>
+          <h2>自然手绘</h2>
+          <span class="chip chip-default">默认</span>
+          <span class="chip">hand-natural</span>
+        </div>
+        <p class="preset-desc">最接近真实手感：轻微倾斜、低频起伏，重来一次也长这样。</p>
+        <dl class="preset-spec">
+          <div><dt>幅度</dt><dd>0.10</dd></div>
+          <div><dt>笔宽</dt><dd>2.0 px</dd></div>
+          <div><dt>控制点</dt><dd>4</dd></div>
+        </dl>
+      </header>
+
+      <div class="sample" data-sample="short" data-seed="demo-short">
+        <p class="sample-label"><span>01</span>短句</p>
+        <p class="sample-text"><span class="line" data-line="0">确定性，让手绘始终如一。</span></p>
+      </div>
+
+      <div class="sample" data-sample="long" data-seed="demo-long">
+        <p class="sample-label"><span>02</span>长句</p>
+        <p class="sample-text"><span class="line" data-line="0">同一处标注在重绘、缩放与翻页之后都应保持一致。</span></p>
+      </div>
+
+      <div class="sample" data-sample="cross" data-seed="demo-cross">
+        <p class="sample-label"><span>03</span>跨行</p>
+        <div class="sample-lines">
+          <p class="sample-text"><span class="line" data-line="0">跨行的标注按行分别绘制，</span></p>
+          <p class="sample-text"><span class="line" data-line="1">每一行都拥有自己的种子与笔迹。</span></p>
+        </div>
+      </div>
+    </article>
+
+    <!-- ------------------------------------------------- 明显手绘 -- -->
+    <article class="preset" data-preset="hand-strong">
+      <header class="preset-head">
+        <div class="preset-title">
+          <span class="swatch" data-level="strong"></span>
+          <h2>明显手绘</h2>
+          <span class="chip">hand-strong</span>
+        </div>
+        <p class="preset-desc">起伏与笔宽更明确，适合重点句与标题旁注。</p>
+        <dl class="preset-spec">
+          <div><dt>幅度</dt><dd>0.16</dd></div>
+          <div><dt>笔宽</dt><dd>2.4 px</dd></div>
+          <div><dt>控制点</dt><dd>5</dd></div>
+        </dl>
+      </header>
+
+      <div class="sample" data-sample="short" data-seed="demo-short">
+        <p class="sample-label"><span>01</span>短句</p>
+        <p class="sample-text"><span class="line" data-line="0">确定性，让手绘始终如一。</span></p>
+      </div>
+
+      <div class="sample" data-sample="long" data-seed="demo-long">
+        <p class="sample-label"><span>02</span>长句</p>
+        <p class="sample-text"><span class="line" data-line="0">同一处标注在重绘、缩放与翻页之后都应保持一致。</span></p>
+      </div>
+
+      <div class="sample" data-sample="cross" data-seed="demo-cross">
+        <p class="sample-label"><span>03</span>跨行</p>
+        <div class="sample-lines">
+          <p class="sample-text"><span class="line" data-line="0">跨行的标注按行分别绘制，</span></p>
+          <p class="sample-text"><span class="line" data-line="1">每一行都拥有自己的种子与笔迹。</span></p>
+        </div>
+      </div>
+    </article>
+
+  </section>
+
+  <section class="longline" aria-label="长行稳定性检查">
+    <header class="section-head">
+      <div>
+        <h2>长行检查</h2>
+        <p>同样的种子与行高，只把行拉长。幅度不随行宽变化，所以长行也不会出现夸张的波浪或密集抖动。</p>
+      </div>
+      <span class="chip">同一 seed · 同一行号</span>
+    </header>
+    <div class="long-rows">
+      <div class="long-row" data-preset="hand-soft" data-seed="demo-very-long">
+        <span class="long-tag" data-level="soft">轻微</span>
+        <span class="line long-line" data-line="0">手绘下划线在很长的行上也不应该变成夸张的波浪：幅度只与行高有关，与行宽无关，因此每一段仍然保持克制而自然的轻微起伏，读者不会因此分心。</span>
+      </div>
+      <div class="long-row" data-preset="hand-natural" data-seed="demo-very-long">
+        <span class="long-tag" data-level="natural">自然</span>
+        <span class="line long-line" data-line="0">手绘下划线在很长的行上也不应该变成夸张的波浪：幅度只与行高有关，与行宽无关，因此每一段仍然保持克制而自然的轻微起伏，读者不会因此分心。</span>
+      </div>
+      <div class="long-row" data-preset="hand-strong" data-seed="demo-very-long">
+        <span class="long-tag" data-level="strong">明显</span>
+        <span class="line long-line" data-line="0">手绘下划线在很长的行上也不应该变成夸张的波浪：幅度只与行高有关，与行宽无关，因此每一段仍然保持克制而自然的轻微起伏，读者不会因此分心。</span>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>
+      集成：<code>window.StudioHandUnderline</code> · 每个文本行造一个 <code>&lt;svg&gt;</code>，
+      以 <code>render(svg, { width, height, style, seed, lineIndex })</code> 绘制；
+      旧的 <code>"hand"</code> 自动映射为 <code>"hand-natural"</code>，每一行独立成笔。
+    </p>
+  </footer>
+</main>
+
+<script src="../web/hand-underline.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var api = window.StudioHandUnderline;
+  var statusNode = document.getElementById("status");
+  var redrawButton = document.getElementById("redraw");
+
+  function hash(text) {
+    var value = 2166136261;
+    for (var i = 0; i < text.length; i += 1) {
+      value ^= text.charCodeAt(i);
+      value = Math.imul(value, 16777619);
+    }
+    return value >>> 0;
+  }
+
+  function paintLine(line) {
+    var host = line.closest("[data-preset]");
+    var seedHost = line.closest("[data-seed]");
+    if (!host || !seedHost) return;
+    var rect = line.getBoundingClientRect();
+    var width = Math.max(1, rect.width);
+    var height = Math.max(1, rect.height);
+    var svg = line.querySelector(":scope > svg.hand-underline");
+    if (!svg) {
+      svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.classList.add("hand-underline");
+      line.appendChild(svg);
+    }
+    api.render(svg, {
+      width: width,
+      height: height,
+      style: host.dataset.preset,
+      seed: seedHost.dataset.seed,
+      lineIndex: Number(line.dataset.line) || 0,
+    });
+  }
+
+  function paintAll() {
+    var lines = document.querySelectorAll(".line[data-line]");
+    for (var i = 0; i < lines.length; i += 1) paintLine(lines[i]);
+    return lines.length;
+  }
+
+  function fingerprint() {
+    var parts = [];
+    var paths = document.querySelectorAll("svg.hand-underline path.hand-underline-ink");
+    for (var i = 0; i < paths.length; i += 1) parts.push(paths[i].getAttribute("d") || "");
+    return hash(parts.join("|")).toString(16).padStart(8, "0");
+  }
+
+  function showFingerprint(count, previous) {
+    var current = fingerprint();
+    var digest = "#" + current;
+    if (previous && previous === current) {
+      statusNode.textContent = "重新绘制后形状完全一致 ✓ · " + digest;
+      statusNode.classList.add("ok");
+    } else {
+      statusNode.textContent = "路径指纹 " + digest + " · " + count + " 条";
+      statusNode.classList.remove("ok");
+    }
+    return current;
+  }
+
+  function draw() {
+    var count = paintAll();
+    return showFingerprint(count);
+  }
+
+  var digest = null;
+  var frame = 0;
+  function schedule() {
+    window.cancelAnimationFrame(frame);
+    frame = window.requestAnimationFrame(function () {
+      digest = draw();
+    });
+  }
+
+  redrawButton.addEventListener("click", function () {
+    var previous = digest;
+    digest = draw();
+    showFingerprint(document.querySelectorAll(".line[data-line]").length, previous);
+  });
+
+  window.addEventListener("resize", schedule);
+  window.addEventListener("load", schedule);
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(schedule).catch(schedule);
+  }
+  schedule();
+})();
+</script>
+</body>
+</html>

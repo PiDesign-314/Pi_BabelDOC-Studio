@@ -63,7 +63,16 @@ def default_target(source: str | Path) -> Path:
 
 
 def _color(item: dict) -> tuple[float, float, float]:
-    return COLORS.get(str(item.get("color")), COLORS["yellow"])
+    value = str(item.get("color") or "").strip().lower()
+    if value in COLORS:
+        return COLORS[value]
+    # User-managed colour tags may carry a custom "#rrggbb" colour.
+    if len(value) == 7 and value.startswith("#"):
+        try:
+            return tuple(int(value[index : index + 2], 16) / 255 for index in (1, 3, 5))
+        except ValueError:
+            pass
+    return COLORS["yellow"]
 
 
 def _ink_color(item):
@@ -149,7 +158,7 @@ def export(
                         continue
                     factory = (
                         page.add_highlight_annot
-                        if item.get("style", "marker") in {"marker", "crayon", "hand"}
+                        if item.get("style", "marker") in {"marker", "crayon"}
                         else page.add_underline_annot
                     )
                     annot = factory(quads=rects)

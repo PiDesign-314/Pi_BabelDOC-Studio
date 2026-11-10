@@ -30,6 +30,7 @@ babeldoc --openai `
   [--no-auto-extract-glossary] [--save-auto-extracted-glossary] `
   [--qps 4] [--custom-system-prompt "..."] `
   [--skip-scanned-detection] [--auto-enable-ocr-workaround] `
+  [--disable-rich-text-translate] `
   [--openai-term-extraction-model <model>]
 ```
 
@@ -41,6 +42,14 @@ babeldoc --openai `
 - 自动提取术语**默认开启**，关闭要显式传 `--no-auto-extract-glossary`。
 - 术语提取走独立模型：`--openai-term-extraction-model`。
 - 没有 `--openai-api-key` 时会读 `OPENAI_API_KEY` 环境变量。
+- 「兼容性优先」开启时传 `--disable-rich-text-translate`：上游说明该选项可改善部分 PDF
+  的兼容性；本项目现在只把它当作「完整性校验失败后的自动恢复手段」和用户手动选项，
+  默认路径由 `core/babelguard` 兜底（见第 8 节）。
+- BabelDOC 0.6.x 的翻译缓存**在模型返回空字符串时也会写入空值**，而回退路径不会再次校验，
+  于是同一段之后每次都会得到空译文。本项目双层防护：任务启动前用 `core/babelcache.py`
+  删除 `cache.v1.db` 中 `trim(translation)=''` 的行；BabelDOC 子进程内的
+  `core/babelguard` 再把「空缓存值」当作未命中、并拒绝写入空译文（见第 8 节）。
+
 
 ## 3. 输出文件命名
 
@@ -88,7 +97,19 @@ attention,注意力机制,zh
 
 `app.py` 提供 REST 接口：`/api/bootstrap`、`/api/settings`、`/api/pick`、
 `/api/upload`、`/api/jobs`、`/api/jobs/<id>`（轮询日志与进度）、`/api/glossaries*`、
-`/api/open`、`/api/test-connection`。
+`/api/open`、`/api/test-connection`，以及结果库 / Zotero 桥接接口
+`/api/zotero/open`、`/api/zotero/library` 等。
+
+结果库的阅读与翻译入口（2026-11 交互调整）：
+
+- `POST /api/zotero/open` 的 `mode` 有三种：`read`（默认，导入/复用 Zotero 附件副本并打开阅读器）、
+  `prepare`（只导入/复用副本，返回 `url = /?prepare=<绝对路径>`，**不启动翻译任务**，供结果库
+  「翻译」按钮先让用户确认设置）、`translate`（旧行为，立即开始任务，Zotero 插件仍使用）。
+- `read` 模式支持可选 `variant`：`original` / `translation` / `dual`，分别打开原文、仅译文、
+  左右排版译文；不存在时返回 404 `variant_missing`，非法值返回 400 `bad_variant`。
+  不传时保持原有偏好（上次阅读的译文 → 双语 → 译文 → 原文）。
+- 翻译首页支持 `/?prepare=<urlencoded 绝对路径>`（兼容 `?file=`）：载入该 PDF、显示设置并聚焦
+  「开始翻译」，绝不自动开始；与 `?job=` 同时出现时任务恢复优先。
 
 ## 6. 费用统计
 
@@ -134,3 +155,119 @@ price_output / price_currency` 覆盖内置参考价。
 - 术语库目前单选；BabelDOC 本身支持多文件，UI 可扩展为多选。
 - 未做任务历史记录，进程退出后结果只留在输出目录。
 - `pythonw` 无控制台，启动失败会写入 `%APPDATA%\BabelDOC-Studio\last-error.log`。
+
+## 8. 译文缺失（空白段）：根因、防护与校验
+
+这一节记录 2026-11 修复「部分段落没有译文、页面大面积空白」时的结论，后续不要重复调研。
+
+### 8.1 根因链（BabelDOC 0.6.4 + deepseek-flash 实测）
+
+1. 默认（富文本）路径走 `format/pdf/document_il/midend/il_translator_llm_only.py`：把多个段落
+   打包成一个 JSON 数组请求模型，要求返回同长度 JSON。
+2. 模型（例：`deepseek-flash`）偶尔返回非法 JSON（`Expecting value: line 1 column 1 (char 0)`、
+   `Unterminated string ...`），整个批次失败，BabelDOC 退回逐段翻译
+   （`il_translator.translate_paragraph`）。
+3. 逐段翻译偶尔收到**空字符串回复**；`post_translate_paragraph` 不校验空值，直接把
+   `paragraph.unicode = ""`、生成空的 composition，排版阶段自然没有文字对象 → 页面上该段位置
+   完全空白（不是文字变小或排版错位，而是真的没有内容）。
+4. 空回复还会被 `BaseTranslator.llm_translate` 写进 `~/.cache/babeldoc/cache.v1.db`，之后
+   同一段永远命中空译文，空白可复现。
+5. 复现证据：`.lead/repro/real-out/stein-real/work/stein/translate_tracking.json` 中
+   `output=""` 的段落（`Due to notable advancements…`、`The tendency to treat computers…`、
+   `Considering the social quality…`、`Despite being an increasingly…`）正好是产物 PDF 里
+   空白的四段；用本地 mock LLM 对其中一段返回空串即可离线复现。
+
+### 8.2 运行时防护 `core/babelguard/`（新增）
+
+不改动已安装的 BabelDOC，也不 fork 上游：`core/runner.py` 给 BabelDOC 子进程设置
+
+```text
+PYTHONPATH = <repo>\core\babelguard [; 原有 PYTHONPATH]
+BABELDOC_STUDIO_GUARD = 1
+BABELDOC_STUDIO_GUARD_STATUS = <每次调用的状态文件路径>
+BABELDOC_STUDIO_GUARD_DOC = <任务/文件标识>
+可选：BABELDOC_STUDIO_GUARD_LOG / _RETRIES / _BACKOFF / _DOC
+```
+
+Python 启动时会自动 import `sitecustomize.py`，由它调用 `babeldoc_guard.install()` 打补丁。
+补丁全部防御式：任一安装步骤失败只记录事件，不影响翻译；未设置环境变量时完全不生效
+（非 BabelDOC 的 Python 进程、BabelDOC 自己的字体子进程都会跳过）。
+
+| # | 目标 | 作用 |
+|---|------|------|
+| 1 | `TranslationCache.get` | 空/纯空白缓存值视为未命中 |
+| 2 | `TranslationCache.set` | 永不写入空译文 |
+| 3 | `BaseTranslator.translate` / `.llm_translate` | 空回复按退避重试（默认 2 次，1s/3s），返回最后一次结果；按段落累计重试次数 |
+| 4 | `ILTranslator.post_translate_paragraph` | 原文非空而译文为空 → 不应用空译文，段落保留原文，记录 EMPTY/KEPT_ORIGINAL |
+| 5 | `ILTranslator.translate_paragraph` | 逐段记录页码（1 起）、`debug_id`、原文/译文字数、状态、重试次数、错误原因 |
+| 6 | `ILTranslatorLLMOnly.translate_paragraph` | 记录 JSON 批次失败 / 回退事件，便于定位"又是 JSON 协议"的问题 |
+| 7 | `Typesetting.render_paragraph` | 排版后若无可绘制字符 → 记 RENDER_FAILED，并按最小字号强制排版兜底（FORCED） |
+| 8 | `PDFCreater.render_paragraph_to_char` | 非空原文却产不出字符时补记 RENDER_FAILED（不改变行为） |
+
+`--debug` 模式会额外生成 `pagenumber`、`paragraph[...]` 之类的标记段落（没有 `debug_id`）：
+守卫对它们**不记录、不恢复**，与上游 `pdf_creater` 的处理一致，避免误报缺失。
+
+状态文件（退出时原子写入，取消时每 2s 增量落盘）：
+
+```json
+{"schema":1,"guard":"babeldoc-studio","doc":"paper.pdf",
+ "paragraphs":[{"page":2,"paragraph_id":"mfKck","source_chars":707,"translated_chars":707,
+   "status":"RENDERED","retry_count":2,
+   "error_reason":"empty_translation_kept_original",
+   "layout_status":"kept_original","render_status":"rendered"}],
+ "counts":{"paragraphs":29,"translated":28,"empty":0,"render_failed":0,
+           "retried":1,"kept_original":1},
+ "errors":[]}
+```
+
+关键语义：**收到空回复、保留原文的段落**最终是 `status=RENDERED` +
+`layout_status=kept_original` + `error_reason=empty_translation_kept_original`，
+`counts.translated` 不计入它，`counts.kept_original` 计入；`page` 为 1 起的页码。
+
+### 8.3 完整性校验 `core/translate_qa.py`（新增）
+
+`verify(source_pdf, output_pdf, kind, guard_status=None, page_filter=None)`：
+
+- 有守卫状态时以逐段记录为准（真正的丢失：FAILED / LOST / RENDER_FAILED；保留原文单独统计）；
+- 再用 PDF 版式做独立兜底：单栏逐段落区块覆盖率（源段落框在产物页上没有文字 → 缺失）、
+  双栏左右半页文字面积比（<0.35 → 右半缺失；实测健康页 0.65-0.94、坏页 0.23、空页 0.10-0.14）、
+  整页空白（沿用 `core/pdfqa.py` 阈值）；
+- 返回 `ok / checked / expected_paragraphs / translated_paragraphs / untranslated_paragraphs /
+  missing / untranslated / blank_pages / warnings / guard`，每条缺失都带页码与段落 ID；
+- 自身任何异常都退化为 `checked=False`，绝不影响任务。
+
+`core/runner.py` 每次 BabelDOC 调用结束后都会校验；发现**真正缺失**时自动用兼容模式
+（`--disable-rich-text-translate`）把该文件重译一次，比较两次结果保留更完整的一份；
+仍不完整则写入结果卡的 `warning` 与 `blank_pages`，任务不会静默通过。
+注意：兼容模式**并不会**切换翻译器——BabelDOC 0.6.4 对支持 LLM 的服务商始终走
+`ILTranslatorLLMOnly` 的 JSON 批次协议，`--disable-rich-text-translate` 只去掉富文本占位符。
+因此自动重译主要降低"占位符/富文本样式"导致的失败，对"模型返回空串"这类问题真正兜底的是
+`core/babelguard` 的空译文拒写 + 重试 + 保留原文。
+
+### 8.4 结果字段与日志
+
+`/api/jobs/<id>` 的 `results[]` 新增 `incomplete`、`qc`（截断后的完整报告，含
+`missing_total` / `untranslated_total`）、`warning`（中文、带页码/段落 ID）；
+job 快照新增 `quality`（`checked / ok / missing / untranslated / pages / warnings`，
+同一文档同时产出单语/双语时按源文件去重，不重复计数）。
+结果卡沿用 `warning` / `blank_pages` 展示，并在有空白页时提供「用兼容模式重译」按钮。
+
+### 8.5 回归测试
+
+- `tests/test_babelguard.py`：假 BabelDOC 模块树验证 8 个补丁、重试/退避、空缓存、状态合并、
+  OWNER 防重复安装、debug 标记段落忽略等（不需要安装 babeldoc）。
+- `tests/test_translate_qa.py`：合成 PDF 覆盖单栏/双栏/空白页/守卫状态混合计数/损坏文件等。
+- `tests/translate_fixtures.py` + `tests/test_translate_completeness.py`：本地 mock LLM 的
+  端到端回归（`empty` 场景必须「没有空白 + 明确标记」，并对未打补丁的管线验证会失败）。
+- `tests/test_runner_recovery.py`：runner 的守卫环境变量、缺失判定、兼容模式重译与结果字段。
+
+### 8.6 已知限制
+
+- 空回复来自服务商行为，重试仍可能为空；此时**保留原文并明确标记**，不会用空白冒充成功。
+- 兼容模式重译是整文件重跑（不合并单页），只在检测到真正缺失时触发一次，费用与时间会翻倍；
+  它不会绕开 JSON 批次协议（见 8.3 的说明），效果有限。
+- PDF 版式兜底是启发式：公式、纯图表、扫描页可能被忽略；有守卫状态时以逐段记录为准。
+- 一次调用翻译多个文件时，守卫状态文件不按文件拆分（只有页码/段落 ID），因此不使用它做逐段
+  核对，此时完整性校验退回 PDF 版式兜底路径。
+- 若上游 BabelDOC 升级改变了内部模块/函数名，守卫会记录 `errors` 并以「无状态文件」降级，
+  完整性校验自动退回 PDF 兜底路径（`core/runner.py` 不依赖守卫一定安装成功）。

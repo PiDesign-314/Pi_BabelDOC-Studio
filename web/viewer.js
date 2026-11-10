@@ -1,4 +1,4 @@
-/* BabelDOC Studio — built-in PDF reader.
+/* ReadPI — built-in PDF reader.
  *
  * The document scrolls continuously, page after page, so reading never stops
  * at a page boundary and a selection can run from one page into the next.
@@ -21,6 +21,10 @@
   const params = new URLSearchParams(location.search);
   const docPath = params.get("path") || "";
   const origin = params.get("from") || "library";
+  /* Zotero (and notes) may ask for a specific page: `page` is 1-based and wins
+     over the locally remembered position.  `from=zotero` only changes the
+     toast, the reader stays the same reader. */
+  const requestedPage = Math.max(0, Math.round(Number(params.get("page")) || 0));
 
   if (window.pdfjsLib) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = "/assets/pdfjs/build/pdf.worker.min.js";
@@ -30,7 +34,7 @@
   const KEEP = 4; /* pages kept in memory on either side of the reader */
   const TIP_DELAY = 160; /* ms of hover before the note preview opens */
   const POSITION_KEY = "babeldoc-pos:";
-  const COLOR_HEX = {
+  const COLOR_PALETTE = {
     yellow: "#ffd54a",
     green: "#74dc9e",
     blue: "#7cc4ff",
@@ -40,6 +44,16 @@
     teal: "#4fd6c6",
     red: "#ff8a80",
   };
+  /* Colour tags may use a custom #rrggbb value, which is not a palette key.
+     Every paint site indexes COLOR_HEX with the stored colour, so a hex key
+     resolves to itself here: marks, badges, margin cards, leader lines and
+     note dots stay correct for custom colours without a lookup at each call. */
+  const COLOR_HEX = new Proxy(COLOR_PALETTE, {
+    get(target, key) {
+      if (typeof key !== "string") return target[key];
+      return target[key] || (/^#[0-9a-f]{6}$/i.test(key) ? key.toLowerCase() : undefined);
+    },
+  });
   const COLOR_LABEL = {
     yellow: "黄色",
     green: "绿色",
@@ -61,20 +75,213 @@
     teal: "方法",
   };
 
-  /* Every colour affordance in the reader (toolbar, editor, right-click menu,
-     sidebar filter) must describe the same colour tag when hints are on. */
-  function colorHint(color) {
-    const base = COLOR_LABEL[color] || color;
+  /* Freehand strokes and lines default to a clear red so a sketch is visible
+     on the page immediately; page text keeps its dark default. */
+  const DEFAULT_INK = "#ff375f";
+  const LEGACY_INK = "#30343b";
+  const INK_VALUE = /^#[0-9a-f]{6}$/i;
+  function savedInkColor() {
+    const value = String(readerPrefs.inkColor || "").toLowerCase();
+    /* #30343b was the old automatic default, not a deliberate pick. */
+    return INK_VALUE.test(value) && value !== LEGACY_INK ? value : DEFAULT_INK;
+  }
+  function savedTextColor() {
+    const value = String(readerPrefs.textColor || "").toLowerCase();
+    return INK_VALUE.test(value) ? value : LEGACY_INK;
+  }
+  /* ------------------------------------------------------- colour tags -- */
+  /* A colour value is either a palette key or a custom #rrggbb tag colour. */
+  const COLOR_VALUE = /^#[0-9a-f]{6}$/i;
+  function colorValue(value) {
+    const key = String(value == null ? "" : value).trim().toLowerCase();
+    if (COLOR_PALETTE[key]) return key;
+    return COLOR_VALUE.test(key) ? key : "";
+  }
+  /* The one colour resolver: palette key -> hex, #rrggbb -> itself, else the
+     yellow fallback.  An annotation whose tag was deleted keeps rendering in
+     the colour value stored with it. */
+  function colorHex(value) {
+    const key = String(value == null ? "" : value).trim().toLowerCase();
+    return COLOR_HEX[key] || COLOR_PALETTE.yellow;
+  }
+  function colorName(value) {
+    return COLOR_LABEL[colorValue(value)] || "";
+  }
+  function paletteKey(value) {
+    return COLOR_PALETTE[colorValue(value)] ? colorValue(value) : "";
+  }
+  /* A tag whose custom hex happens to be an exact palette colour is stored as
+     that palette key again, so re-adding green restores the green palette dot
+     (and keeps the pastel CSS band) instead of a second, lookalike tag. */
+  function normalizeTagColor(value) {
+    const color = colorValue(value);
+    if (!color) return "";
+    const exact = Object.keys(COLOR_PALETTE).find(
+      (key) => COLOR_PALETTE[key].toLowerCase() === color
+    );
+    return exact || color;
+  }
+
+  /* The single ordered source of truth: readerPrefs.colorTags =
+     [{ id, color, name }], color a palette key or a custom #rrggbb.
+     Annotations store their own colour value, so tag edits never touch them. */
+  let colorTagsCache = null;
+  function defaultColorTags() {
+    const labels =
+      readerPrefs.labels && typeof readerPrefs.labels === "object" ? readerPrefs.labels : {};
+    return Object.keys(COLOR_PALETTE).map((key) => ({
+      id: key,
+      color: key,
+      name: String(labels[key] || DEFAULT_COLOR_LABELS[key] || COLOR_LABEL[key] || key),
+    }));
+  }
+  function newColorTagId() {
+    return `tag-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+  function readColorTags() {
+    if (colorTagsCache) return colorTagsCache;
+    const stored = Array.isArray(readerPrefs.colorTags) ? readerPrefs.colorTags : [];
+    const seen = new Set();
+    const clean = [];
+    for (const entry of stored) {
+      if (!entry || typeof entry !== "object") continue;
+      const color = normalizeTagColor(entry.color);
+      if (!color) continue;
+      let id = typeof entry.id === "string" && entry.id ? entry.id : color;
+      while (seen.has(id)) id = `${color}-${clean.length + 1}`;
+      seen.add(id);
+      clean.push({
+        id,
+        color,
+        name: String(entry.name == null ? "" : entry.name) || colorName(color) || colorHex(color),
+      });
+    }
+    colorTagsCache = clean.length ? clean : defaultColorTags();
+    /* First run (or unusable stored data): persist the migration once, keeping
+       the names the reader already gave the palette colours. */
+    readerPrefs.colorTags = colorTagsCache;
+    storePrefs();
+    return colorTagsCache;
+  }
+  function writeColorTags(tags) {
+    colorTagsCache = tags;
+    readerPrefs.colorTags = tags;
+    /* Keep the old labels map in step: builds that predate colour tags still
+       read it, and a later migration finds the current palette names. */
+    const labels = { ...(readerPrefs.labels || {}) };
+    for (const tag of tags) if (COLOR_PALETTE[tag.color]) labels[tag.color] = tag.name;
+    readerPrefs.labels = labels;
+    storePrefs();
+  }
+  /* tagFor matches a palette key or an #rrggbb value, case-insensitively. */
+  function tagFor(value) {
+    const color = colorValue(value);
+    if (!color) return null;
+    return readColorTags().find((tag) => tag.color === color) || null;
+  }
+  /* tagName: the tag's name, else the palette name, else the hex itself.  A
+     deleted tag therefore degrades to 蓝色 / #3aa0ff instead of breaking. */
+  function tagName(value) {
+    const tag = tagFor(value);
+    if (tag && tag.name) return tag.name;
+    return colorName(value) || colorHex(value);
+  }
+  /* The selection toolbar's style buttons create a highlight immediately, so
+     they need a colour: remember the last one the reader picked.  A colour
+     whose tag was deleted falls back to the first tag still in the list. */
+  function savedHighlightColor() {
+    const remembered = colorValue(readerPrefs.highlightColor);
+    const tags = readColorTags();
+    if (remembered && tags.some((tag) => tag.color === remembered)) return remembered;
+    return tags.length ? tags[0].color : "yellow";
+  }
+  function rememberHighlightColor(color) {
+    const value = colorValue(color);
+    if (!value) return;
+    if (readerPrefs.highlightColor === value) return;
+    readerPrefs.highlightColor = value;
+    storePrefs();
+  }
+
+  /* The selection toolbar carries a "+" dot: pick a colour and it becomes a tag,
+     then the current selection is highlighted with it.  Keeping this path
+     independent from the dock popover means a user who is mid-selection never
+     has to leave the selection, open the colour tag manager and select again. */
+  function addColorTagQuick(value) {
+    const color = normalizeTagColor(value);
+    if (!color) {
+      toast("请选择一个颜色", "bad");
+      return null;
+    }
+    const name = colorName(color) || colorHex(color);
+    const tags = readColorTags();
+    const twin = tags.find((tag) => tag.color === color && tag.name === name);
+    if (twin) {
+      rememberHighlightColor(twin.color);
+      return twin;
+    }
+    const tag = { id: newColorTagId(), color, name };
+    writeColorTags([...tags, tag]);
+    rememberHighlightColor(tag.color);
+    renderColorDots();
+    renderNotesList();
+    return tag;
+  }
+
+  /* Every colour affordance (toolbar, editor, right-click menu, sidebar filter)
+     describes the same colour tag when hints are on. */
+  function colorHint(value) {    const base = colorName(value);
     const box = document.getElementById("color-hints");
     const on = !box || box.checked;
-    const labels = { ...DEFAULT_COLOR_LABELS, ...(readerPrefs.labels || {}) };
-    const semantic = labels[color];
-    return on && semantic ? `${base} · ${semantic}` : base;
+    const name = tagName(value);
+    if (!on) return base || name;
+    return base && name && base !== name ? `${base} · ${name}` : name || base;
   }
-  function colorHintLabel(color) {
-    const labels = { ...DEFAULT_COLOR_LABELS, ...(readerPrefs.labels || {}) };
+  function colorHintLabel(value) {
     const box = document.getElementById("color-hints");
-    return box && box.checked ? labels[color] || "" : "";
+    if (box && !box.checked) return "";
+    const base = colorName(value);
+    const name = tagName(value);
+    return base && name && base !== name ? name : "";
+  }
+  /* One colour dot, tag-driven.  A palette tag keeps its palette class (the
+     smoke tests click .r-dot.yellow / .blue / ...); a custom #rrggbb dot gets
+     its colour inline and only the base class. */
+  function colorDotHtml(value, attr = "data-color") {
+    const color = colorValue(value) || "yellow";
+    const palette = paletteKey(color);
+    const label = colorHint(color);
+    return (
+      `<button class="r-dot${palette ? ` ${palette}` : ""}" type="button" ${attr}="${escapeHtml(
+        color
+      )}" style="background:${colorHex(color)}" title="${escapeHtml(label)}"` +
+      `${colorHintLabel(color) ? ` data-hint="${escapeHtml(colorHintLabel(color))}"` : ""}` +
+      ` aria-label="${escapeHtml(label)}"></button>`
+    );
+  }
+  /* The selection toolbar and the annotation editor render one dot per tag in
+     tag order; their static containers hold nothing of their own.  The
+     selection toolbar additionally ends with a "+" dot that opens a native
+     colour picker for a brand-new emphasis colour. */
+  function renderColorDots() {
+    const markup = readColorTags()
+      .map((tag) => colorDotHtml(tag.color))
+      .join("");
+    if (el.selColors) {
+      el.selColors.innerHTML =
+        markup +
+        '<button class="r-dot r-dot-add" type="button" data-add-tag="1"' +
+        ' title="新增重点色" aria-label="新增重点色">＋</button>';
+    }
+    if (el.editorColors) el.editorColors.innerHTML = markup;
+    syncColorDotSelection();
+  }
+  function syncColorDotSelection() {
+    if (!el.editorColors) return;
+    const item = state.items.find((entry) => entry.id === state.activeId);
+    for (const dot of $$(".r-dot", el.editorColors)) {
+      dot.classList.toggle("on", Boolean(item) && dot.dataset.color === colorValue(item.color));
+    }
   }
 
   const el = {
@@ -95,6 +302,8 @@
     saved: $("#save-state"),
     sidebarBtn: $("#btn-sidebar"),
     sidebar: $("#sidebar"),
+    sideHandle: $("#side-handle"),
+    sideExpand: $("#side-expand"),
     tabs: $$(".r-tab"),
     panelThumbs: $("#panel-thumbs"),
     panelNotes: $("#panel-notes"),
@@ -111,6 +320,8 @@
     selCopy: $("#sel-copy"),
     editor: $("#editor"),
     editorPage: $("#editor-page"),
+    selColors: $("#sel-toolbar .r-sel-colors"),
+    selColorPicker: $("#sel-color-picker"),
     editorColors: $("#editor-colors"),
     editorStyles: $("#editor-styles"),
     editorQuote: $("#editor-quote"),
@@ -167,6 +378,7 @@
     tipId: null,
     tipTimer: 0,
     scrollAt: 0,
+    marginLeft: false,
   };
 
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));  const reduceMotion = () =>
@@ -177,6 +389,11 @@
   /* ------------------------------------------------------------- boot -- */
   async function boot() {
     bindTheme($("#btn-theme"));
+    /* One diagnostic line if the hand-underline module did not load: hand marks
+       still paint (CSS underline fallback), but this makes the cause obvious. */
+    if (!handUnderlineApi()) {
+      console.warn("[BabelDoc Studio] 未加载 hand-underline.js：手绘下划线将降级为 CSS 下划线。");
+    }
     el.back.href = origin === "app" ? "/" : "/library";
     el.backLabel.textContent = origin === "app" ? "翻译" : "结果库";
 
@@ -187,7 +404,7 @@
     const name = fileName(docPath);
     el.docName.textContent = name;
     el.docSub.textContent = "载入中…";
-    document.title = `${name} · BabelDOC Studio`;
+    document.title = `${name} · ReadPI`;
 
     await loadAnnotations();
 
@@ -226,11 +443,22 @@
       measureLayout();
       buildThumbs();
       const resume = storedPosition();
-      if (resume && resume <= state.pages) {
-        goToPage(resume, false);
-        toast(`已回到上次读到的第 ${resume} 页`);
+      const startPage = requestedPage
+        ? Math.min(requestedPage, state.pages)
+        : resume && resume <= state.pages
+          ? resume
+          : 0;
+      if (startPage > 1) {
+        goToPage(startPage, false);
+        toast(
+          origin === "zotero"
+            ? `已从 Zotero 打开 · 第 ${startPage} 页`
+            : `已回到上次读到的第 ${startPage} 页`,
+          "good"
+        );
       } else {
         goToPage(1, false);
+        if (origin === "zotero") toast("已从 Zotero 打开", "good");
       }
       document.dispatchEvent(
         new CustomEvent("reader:ready", { detail: { pages: state.pages } })
@@ -255,10 +483,11 @@
   /* ------------------------------------------------------------- layout -- */
   function computeScale() {
     if (!state.fit) return;
-    /* Margin notes sit right of the page, so the page has to give that gutter
-       back before the zoom is calculated. */
+    /* Margin notes sit beside the page, so the page has to give those gutters
+       back before the zoom is calculated.  Cards may sit on both sides. */
     const gutter = state.marginMode ? 288 : 0;
-    const width = Math.max(240, el.stage.clientWidth - 48 - gutter);
+    const leftGutter = state.marginMode && state.marginLeft ? 288 : 0;
+    const width = Math.max(240, el.stage.clientWidth - 48 - gutter - leftGutter);
     const height = Math.max(240, el.stage.clientHeight - 44);
     const widthScale = width / (state.base.w * (!originalVisible && state.base.w > state.base.h * 1.2 ? 0.5 : 1));
     const heightScale = height / state.base.h;
@@ -283,11 +512,15 @@
       const canvas = document.createElement("canvas");
       const text = document.createElement("div");
       text.className = "r-text";
+      /* Selection is painted by the app as one band per text line: the native
+         per-span ::selection paint is fragmented on CJK lines. */
+      const select = document.createElement("div");
+      select.className = "r-select";
       const ghost = document.createElement("div");
       ghost.className = "r-ghost";
       const anno = document.createElement("div");
       anno.className = "r-anno";
-      box.append(canvas, text, ghost, anno);
+      box.append(canvas, text, select, ghost, anno);
       section.append(box);
       fragment.append(section);
 
@@ -297,6 +530,7 @@
         box,
         canvas,
         text,
+        select,
         ghost,
         anno,
         top: 0,
@@ -309,6 +543,7 @@
         task: null,
         nodes: null,
         textCache: null,
+        fontLines: null,
       });
     }
     el.pages.append(fragment);
@@ -598,12 +833,60 @@
     }
     sheet.nodes = null;
     sheet.textCache = null;
+    sheet.fontLines = buildFontLines(sheet) || [];
     try {
       analyseLayout(sheet, content.items, viewport);
     } catch {
       sheet.dual = false;
     }
     sheet.textReady = true;
+  }
+
+  /* A live range reports two boxes per glyph (the font box and the taller span
+     box), so the preview cannot size a band from the rect alone.  PDF.js lays
+     each glyph span out with a percentage ``top`` and a font size of
+     ``calc(var(--scale-factor) * N px)``; reading those inline values gives a
+     page-top -> font-size index without a layout pass.  Sizing the preview from
+     the glyph height then matches what the committed highlight paints. */
+  function buildFontLines(sheet) {
+    /* read the layer height from layout: PDF.js overwrites the inline height
+       with a round(calc(...)) expression, so it cannot be parsed as px */
+    const height = sheet.text.clientHeight;
+    const spans = sheet.text.querySelectorAll("span");
+    if (!(height > 0) || !spans.length) return null;
+    const lines = [];
+    for (const span of spans) {
+      const top = parseFloat(span.style.top);
+      const font = /([\d.]+)px/.exec(span.style.fontSize || "");
+      if (!Number.isFinite(top) || !font) continue;
+      lines.push({ top: (top / 100) * height, em: parseFloat(font[1]) });
+    }
+    lines.sort((a, b) => a.top - b.top);
+    return lines.length ? lines : null;
+  }
+
+  /* Nearest line entry, in page-local client pixels; every selection rect sits
+     a little below the span top it belongs to. */
+  function fontEmAt(sheet, offsetTop) {
+    const lines = sheet.fontLines;
+    if (!lines || !lines.length) return 0;
+    let low = 0;
+    let high = lines.length - 1;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (lines[mid].top < offsetTop) low = mid + 1;
+      else high = mid;
+    }
+    let best = lines[low];
+    let bestDist = Math.abs(best.top - offsetTop);
+    const previous = lines[low - 1];
+    if (previous && Math.abs(previous.top - offsetTop) < bestDist) {
+      best = previous;
+      bestDist = Math.abs(best.top - offsetTop);
+    }
+    const next = lines[low + 1];
+    if (next && Math.abs(next.top - offsetTop) < bestDist) best = next;
+    return best.em;
   }
 
   /* ------------------------------------------------------ bilingual sync -- */
@@ -866,19 +1149,73 @@
     renderSync(byPage);
   }
 
+  /* --------------------------------------------------- selection paint -- */
+  /* The native ::selection background is transparent (see viewer.css), so the
+     selection is painted here as one translucent band per visual line.  The
+     bands are built with the same line-band builder the committed highlight is
+     painted from, so picking a colour does not move or resize the preview. */
+  function clearPickBands() {
+    for (const sheet of state.sheets) {
+      if (sheet.select && sheet.select.childElementCount) sheet.select.innerHTML = "";
+    }
+  }
+
+  /* ``byPage`` maps a page number to page-space bands ({x, y, w, h}); the
+     scale is applied here exactly like renderSync and the annotation marks.
+     Band nodes are reused between frames: re-creating the whole layer on every
+     pointer move dirtied the page's style/layout while the selection was being
+     dragged. */
+  function renderPickBands(byPage) {
+    const scale = state.scale;
+    for (const sheet of state.sheets) {
+      const layer = sheet.select;
+      if (!layer) continue;
+      const bands = (byPage && byPage.get(sheet.no)) || [];
+      while (layer.childElementCount > bands.length) layer.lastElementChild.remove();
+      while (layer.childElementCount < bands.length) {
+        const pick = document.createElement("div");
+        pick.className = "r-pick";
+        layer.append(pick);
+      }
+      for (let index = 0; index < bands.length; index += 1) {
+        const band = bands[index];
+        const pick = layer.children[index];
+        pick.style.left = `${band.x * scale}px`;
+        pick.style.top = `${band.y * scale}px`;
+        pick.style.width = `${band.w * scale}px`;
+        pick.style.height = `${band.h * scale}px`;
+      }
+    }
+  }
+
   /* While the pointer is still dragging the selection has no text spans yet,
-     so the counterpart is recomputed from the live client rects: the same
-     geometry captureSelection() stores, without walking the text nodes. */
+     so the counterpart is recomputed from the live client rects and the
+     selection preview is rebuilt with the same band builder the committed
+     highlight uses, without walking the text nodes. */
   function syncSelectionLive() {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.rangeCount) {
       clearSync();
+      clearPickBands();
       return;
     }
     const range = selection.getRangeAt(0);
-    const byPage = new Map();
+    const live = [];
+    const seen = new Set();
+    for (const rect of range.getClientRects()) {
+      if (rect.width < 0.5 || rect.height < 0.5) continue;
+      /* The same glyph can report two identical rects; the band builder only
+         needs one of them. */
+      const key = `${Math.round(rect.left * 10)},${Math.round(rect.top * 10)},` +
+        `${Math.round(rect.width * 10)},${Math.round(rect.height * 10)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      live.push(rect);
+    }
+    const sync = new Map();
+    const picks = new Map();
     for (const sheet of state.sheets) {
-      if (!sheet.dual || !sheet.textReady) continue;
+      if (!sheet.textReady) continue;
       let touches = false;
       try {
         touches = range.intersectsNode(sheet.text);
@@ -886,20 +1223,37 @@
         touches = false;
       }
       if (!touches) continue;
+      if (!sheet.fontLines) sheet.fontLines = buildFontLines(sheet) || [];
       const box = sheet.box.getBoundingClientRect();
-      const rects = [];
-      for (const rect of range.getClientRects()) {
-        if (rect.width < 0.5 || rect.height < 0.5) continue;
-        rects.push({
-          x: (rect.left - box.left) / state.scale,
-          y: (rect.top - box.top) / state.scale,
-          w: rect.width / state.scale,
-          h: rect.height / state.scale,
+      const scale = state.scale;
+      const pieces = [];
+      const plain = [];
+      for (const rect of live) {
+        /* A selection can run from one page into the next.  Only the rects
+           that fall inside this sheet's own box belong to it, otherwise every
+           page in the selection would paint all pages' rectangles. */
+        if (rect.right <= box.left || rect.left >= box.right) continue;
+        if (rect.bottom <= box.top || rect.top >= box.bottom) continue;
+        const em = fontEmAt(sheet, rect.top - box.top) * scale;
+        pieces.push({ rect, em });
+        /* The dual-page counterpart keeps its old input: the raw line boxes. */
+        plain.push({
+          x: (rect.left - box.left) / scale,
+          y: (rect.top - box.top) / scale,
+          w: rect.width / scale,
+          h: rect.height / scale,
         });
       }
-      if (rects.length) byPage.set(sheet.no, legacyBands(rects));
+      if (!pieces.length) continue;
+      /* Same band builder as the committed highlight: glyph-height bands with
+         the paint padding, so the preview is exactly the mark that will stay. */
+      picks.set(sheet.no, bandsFromRects(pieces, sheet));
+      /* The counterpart bands on dual pages keep consuming the per-page
+         rects, exactly as before. */
+      if (sheet.dual) sync.set(sheet.no, plain);
     }
-    renderSync(byPage);
+    renderSync(sync);
+    renderPickBands(picks);
   }
 
   let syncFrame = 0;
@@ -956,13 +1310,21 @@
     sheet.canvas.width = 0;
     sheet.canvas.height = 0;
     sheet.text.innerHTML = "";
+    sheet.select.innerHTML = "";
     sheet.ghost.innerHTML = "";
     sheet.anno.innerHTML = "";
+    /* The margin rails are siblings of .r-anno, so a released page must drop
+       them explicitly or stale cards would float over the empty sheet. */
+    const leftRail = sheet.el.querySelector(":scope > .r-margin-left");
+    const rightRail = sheet.el.querySelector(":scope > .r-margin-right");
+    if (leftRail) leftRail.remove();
+    if (rightRail) rightRail.remove();
     sheet.lines = null;
     sheet.blocks = null;
     sheet.dual = false;
     sheet.nodes = null;
     sheet.textCache = null;
+    sheet.fontLines = null;
     sheet.textArgs = null;
     state.textQueue.delete(sheet);
     sheet.painted = false;
@@ -991,6 +1353,7 @@
   function relayout(anchor) {
     clearSync();
     resetSheets();
+    syncMarginColumns();
     computeScale();
     sizeSheets();
     measureLayout();
@@ -1059,6 +1422,45 @@
       window.localStorage.setItem(POSITION_KEY + docPath, String(state.page));
     } catch {
       /* private mode / quota — reading position is only a convenience */
+    }
+    reportReadingPosition(false);
+  }
+
+  /* Zotero resumes from the server side, so the position is mirrored to
+     /api/zotero/position.  The endpoint ignores documents that are not linked
+     to a Zotero attachment; the call is throttled and best effort, because a
+     reading position must never break the reader or slow scrolling down. */
+  let positionReportAt = 0;
+  let positionReportPage = 0;
+
+  function reportReadingPosition(flush) {
+    if (!docPath || !state.pages) return;
+    const now = Date.now();
+    if (!flush && positionReportPage === state.page) return;
+    if (!flush && now - positionReportAt < 3000) return;
+    positionReportAt = now;
+    positionReportPage = state.page;
+    const body = JSON.stringify({
+      path: docPath,
+      page: state.page,
+      pages: state.pages,
+    });
+    try {
+      if (flush && navigator.sendBeacon) {
+        navigator.sendBeacon(
+          "/api/zotero/position",
+          new Blob([body], { type: "application/json" })
+        );
+        return;
+      }
+      fetch("/api/zotero/position", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    } catch {
+      /* the next page change retries */
     }
   }
 
@@ -1332,11 +1734,39 @@
   function bandsFromRects(rects, sheet) {
     const box = sheet.box.getBoundingClientRect();
     const scale = state.scale;
-    const pieces = rects.map(({ rect, em }) => {
-      /* A range's client rect is the line box, which is taller than the
-         glyphs; the span's font size is the actual height of the text, so
-         size the band from that and keep it centred on the line box. */
-      const glyph = em ? Math.min(rect.height, em * 1.12) : rect.height;
+    /* A live range reports *two* boxes for every glyph:
+       - PDF.js's span box, exactly one em tall, which is where the glyph is;
+       - the browser's font box (ascent+descent, ~1.33em), taller and not
+         perfectly concentric with the em box.
+       Building the band from both inflated it: the union started ~0.17em above
+       the glyphs and ended ~0.6em past them once the page-space padding was
+       re-scaled by the zoom factor (measured 1.25em tall at 100%, 1.28em at
+       400%: the user's "the selection band hangs past the text" report).
+       Keep the box whose height is closest to the em size and centre the band
+       on it, so the band is exactly the PDF.js em box + a hair of padding. */
+    const chosen = [];
+    for (const entry of rects) {
+      const { rect, em } = entry;
+      const score = em ? Math.abs(rect.height - em) : rect.height;
+      /* The two boxes of one glyph share x/width and overlap vertically; the
+         same x/width on another visual line does not overlap. */
+      const hit = chosen.find(
+        (candidate) =>
+          Math.abs(candidate.rect.left - rect.left) < 0.5 &&
+          Math.abs(candidate.rect.width - rect.width) < 0.5 &&
+          rect.top < candidate.rect.bottom &&
+          candidate.rect.top < rect.bottom
+      );
+      if (!hit) {
+        chosen.push({ rect, em, score });
+      } else if (score < hit.score) {
+        hit.rect = rect;
+        hit.em = em;
+        hit.score = score;
+      }
+    }
+    const pieces = chosen.map(({ rect, em }) => {
+      const glyph = em ? Math.min(rect.height, em) : rect.height;
       return {
         x: (rect.left - box.left) / scale,
         y: (rect.top + (rect.height - glyph) / 2 - box.top) / scale,
@@ -1370,9 +1800,13 @@
       line.centre = (line.top + line.bottom) / 2;
     }
     /* A hair of vertical padding keeps ascenders and descenders inside the
-       band without letting two lines touch. */
+       band without letting two lines touch.  It is a fraction of the em box
+       (and the band is painted in page space, so it is multiplied by the zoom
+       like the glyphs themselves): a fixed pixel pad used to grow with the
+       zoom and, together with the font-box height, made the band read as a
+       tall tinted strip at 150-400%. */
     const bands = lines.map((line) => {
-      const pad = Math.min(0.6, line.h * 0.08);
+      const pad = Math.max(0.15, line.h * 0.06);
       return {
         x: line.left,
         y: line.top - pad,
@@ -1386,7 +1820,7 @@
     for (let index = 1; index < bands.length; index += 1) {
       const previous = bands[index - 1];
       const band = bands[index];
-      const below = previous.y + previous.h + 0.2;
+      const below = previous.y + previous.h + 0.35;
       if (band.y < below) {
         const overlap = below - band.y;
         band.y += overlap;
@@ -1475,7 +1909,7 @@
     for (let index = 1; index < merged.length; index += 1) {
       const previous = merged[index - 1];
       const band = merged[index];
-      const below = previous.y + previous.h + 0.15;
+      const below = previous.y + previous.h + 0.35;
       if (band.y < below) {
         const overlap = below - band.y;
         band.y += overlap;
@@ -1572,13 +2006,17 @@
     badge.type = "button";
     badge.className = `r-note-badge${state.flashId === item.id ? " flash" : ""}`;
     badge.dataset.id = item.id;
-    badge.style.setProperty("--badge-tint", COLOR_HEX[item.color] || COLOR_HEX.yellow);
+    badge.style.setProperty("--badge-tint", colorHex(item.color));
     badge.innerHTML = NOTE_GLYPH;
     badge.setAttribute("aria-label", `第 ${item.page} 页的批注：${item.comment.slice(0, 40)}`);
     const half = 8.5;
     const width = sheet.width || sheet.box.offsetWidth || 600;
     const height = sheet.height || sheet.box.offsetHeight || 800;
-    badge.style.left = `${clamp(anchor.x * scale + half + 1, half, width - half)}px`;
+    /* The badge lives in the page's own margin, aligned with the last band.
+       Sitting right after the last glyph used to cover the next characters. */
+    const pageWidth = width / (scale || 1);
+    const onRight = anchor.x >= pageWidth / 2;
+    badge.style.left = `${onRight ? width - half - 3 : half + 3}px`;
     badge.style.top = `${clamp(anchor.y * scale, half, height - half)}px`;
     badge.addEventListener("pointerenter", () => scheduleTip(item, badge));
     badge.addEventListener("pointerleave", () => hideTip(true));
@@ -1606,19 +2044,24 @@
       if (item.type === "highlight") {
         const bands = bandsFor(item, sheet);
         if (!bands) continue;
-        for (const rect of bands) {
+        bands.forEach((rect, lineIndex) => {
           const mark = document.createElement("div");
-          mark.className = `r-mark ${item.color}${state.flashId === item.id ? " flash" : ""}`;
+          /* Palette colours keep their pastel CSS band class; a custom #rrggbb
+             tag has no class of its own and is painted inline. */
+          const palette = paletteKey(item.color);
+          mark.className = `r-mark${palette ? ` ${palette}` : ""}${
+            state.flashId === item.id ? " flash" : ""
+          }`;
           mark.dataset.id = item.id;
           mark.dataset.style = item.style || "marker";
-          mark.style.setProperty("--mark-color", COLOR_HEX[item.color]);
+          mark.style.setProperty("--mark-color", colorHex(item.color));
           mark.style.left = `${rect.x * scale}px`;
           mark.style.top = `${rect.y * scale}px`;
           mark.style.width = `${rect.w * scale}px`;
           mark.style.height = `${rect.h * scale}px`;
-          paintMarkFinish(mark, item);
+          paintMarkFinish(mark, item, lineIndex, sheet);
           fragment.appendChild(mark);
-        }
+        });
         const anchor = badgeAnchor(item, sheet);
         if (anchor) fragment.appendChild(makeBadge(item, anchor, sheet));
       } else if (["ink", "text"].includes(item.type) && item.page === sheet.no) {
@@ -1654,18 +2097,92 @@
   }
 
   /* Hand-drawn / crayon marks get an irregular edge; the deterministic jitter
-     keeps a mark stable across repaints and zoom changes. */
-  function paintMarkFinish(mark, item) {
-    const style = item.style || "marker";
-    if (style === "wavy") {
-      mark.style.background = "none";
-      mark.style.backgroundImage = wavyStrip(COLOR_HEX[item.color] || COLOR_HEX.yellow);
-      mark.style.backgroundRepeat = "repeat-x";
-      mark.style.backgroundPosition = "left bottom";
-      mark.style.backgroundSize = "12px 6px";
+     keeps a mark stable across repaints and zoom changes.  The hand-underline
+     module is resolved at paint time on purpose: a module that failed to load
+     must degrade to a CSS underline, never to a filled colour band. */
+  function handUnderlineApi() {
+    const api = window.StudioHandUnderline;
+    return api && typeof api.render === "function" ? api : null;
+  }
+
+  const MARK_WARNINGS = new Set();
+  function warnMarkPaint(key, error) {
+    if (MARK_WARNINGS.has(key)) return;
+    MARK_WARNINGS.add(key);
+    console.warn(
+      `[BabelDoc Studio] 高亮样式绘制失败（${key}），已降级为可视线条：`,
+      error && error.message ? error.message : error
+    );
+  }
+
+  /* Strip every inline decoration a previous paint attempt may have left, so
+     the CSS band of the mark's style is all that remains. */
+  function resetMarkDecorations(mark) {
+    mark.style.background = "";
+    mark.style.backgroundImage = "";
+    mark.style.backgroundRepeat = "";
+    mark.style.backgroundPosition = "";
+    mark.style.backgroundSize = "";
+    mark.style.border = "";
+    mark.style.borderBottom = "";
+    mark.style.borderRadius = "";
+    mark.style.clipPath = "";
+    mark.style.opacity = "";
+    while (mark.firstChild) mark.firstChild.remove();
+    mark.dataset.finish = "band";
+  }
+
+  /* A hand mark always has to read as an underline, even when the SVG module
+     is missing or its geometry cannot be used. */
+  function paintHandFallback(mark) {
+    while (mark.firstChild) mark.firstChild.remove();
+    mark.style.background = "none";
+    mark.style.backgroundImage = "none";
+    mark.style.border = "0";
+    mark.style.borderBottom = "2px solid var(--mark-color, currentColor)";
+    mark.style.borderRadius = "0";
+    mark.style.opacity = "1";
+    mark.dataset.finish = "hand-fallback";
+  }
+
+  /* One independent hand-drawn underline per text line.  The shape only
+     depends on the annotation id, the page and the line index, so a repaint,
+     zoom or reload draws exactly the same stroke. */
+  function paintHandUnderline(mark, item, lineIndex, sheet) {
+    const api = handUnderlineApi();
+    const width = parseFloat(mark.style.width) || mark.offsetWidth || 0;
+    const height = parseFloat(mark.style.height) || mark.offsetHeight || 0;
+    if (!api || width < 2 || height < 2) {
+      paintHandFallback(mark);
       return;
     }
-    if (style !== "hand" && style !== "crayon") return;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("hand-underline");
+    const path = api.render(svg, {
+      width,
+      height,
+      style: api.normalizeStyle(item.style) || api.DEFAULT_STYLE,
+      seed: `${item.id}@p${sheet ? sheet.no : item.page}`,
+      lineIndex,
+      color: colorHex(item.color),
+    });
+    if (!path || !svg.querySelector("path.hand-underline-ink")) {
+      throw new Error("hand underline produced no ink path");
+    }
+    mark.appendChild(svg);
+    mark.dataset.finish = "hand";
+  }
+
+  function paintWavyMark(mark, item) {
+    mark.style.background = "none";
+    mark.style.backgroundImage = wavyStrip(colorHex(item.color));
+    mark.style.backgroundRepeat = "repeat-x";
+    mark.style.backgroundPosition = "left bottom";
+    mark.style.backgroundSize = "12px 6px";
+    mark.dataset.finish = "wavy";
+  }
+
+  function paintCrayonMark(mark, item) {
     let seed = 2166136261;
     for (const ch of String(item.id || "")) {
       seed ^= ch.charCodeAt(0);
@@ -1688,6 +2205,48 @@
       points.push(`${x.toFixed(1)}% ${y.toFixed(1)}%`);
     }
     mark.style.clipPath = `polygon(${points.join(",")})`;
+    mark.dataset.finish = "crayon";
+  }
+
+  /* The render family comes from the single HIGHLIGHT_FAMILIES table; a style
+     the table does not know is a plain colour band.  A failure in one family
+     degrades inside its own lane (hand -> CSS underline, other -> band) and can
+     never break the rest of the page repaint. */
+  function paintMarkFinish(mark, item, lineIndex = 0, sheet = null) {
+    const style = item.style || "marker";
+    const family = highlightFamily(style);
+    mark.dataset.family = family;
+    /* A custom #rrggbb tag has no pastel CSS band of its own: paint the stored
+       colour inline so marker / crayon look like any other colour band. */
+    const custom = !paletteKey(item.color);
+    const paintCustomBand = () => {
+      if (custom && (family === "band" || family === "crayon")) {
+        mark.style.backgroundColor = colorHex(item.color);
+      }
+    };
+    paintCustomBand();
+    try {
+      if (family === "hand") {
+        paintHandUnderline(mark, item, lineIndex, sheet);
+        return;
+      }
+      if (family === "wavy") {
+        paintWavyMark(mark, item);
+        return;
+      }
+      if (family === "crayon") {
+        paintCrayonMark(mark, item);
+        return;
+      }
+      /* band / underline / pencil are pure CSS keyed by data-style */
+    } catch (error) {
+      warnMarkPaint(style, error);
+      if (family === "hand") paintHandFallback(mark);
+      else {
+        resetMarkDecorations(mark);
+        paintCustomBand();
+      }
+    }
   }
 
   function wavyStrip(color) {
@@ -1706,9 +2265,9 @@
   function showTip(item, target) {
     const label = ({note:"便签",highlight:"高亮",text:"文字",ink:"画笔"}[item.type] || "批注");
     el.tip.innerHTML =
-      `<div class="r-tip-head"><span class="r-dotview" style="background:${
-        COLOR_HEX[item.color] || COLOR_HEX.yellow
-      }"></span>第 ${item.page} 页 · ${label}</div>` +
+      `<div class="r-tip-head"><span class="r-dotview" style="background:${colorHex(
+        item.color
+      )}"></span>第 ${item.page} 页 · ${label}</div>` +
       (item.text ? `<p class="r-tip-quote">${escapeHtml(item.text.slice(0, 240))}</p>` : "") +
       `<p class="r-tip-note">${escapeHtml(item.comment || "（没有写备注）")}</p>` +
       `<div class="r-tip-foot">点击打开批注</div>`;
@@ -1796,13 +2355,17 @@
     const chips =
       '<div class="r-filter" role="group" aria-label="按颜色筛选">' +
       `<button type="button" class="r-filter-chip${active.size ? "" : " on"}" data-filter="all">全部</button>` +
-      Object.keys(COLOR_HEX)
-        .map(
-          (color) =>
-            `<button type="button" class="r-filter-chip${active.has(color) ? " on" : ""}" data-filter="${color}" title="${escapeHtml(
-              colorHint(color)
-            )}"${colorHintLabel(color) ? ` data-hint="${escapeHtml(colorHintLabel(color))}"` : ""}><span class="r-dotview" style="background:${COLOR_HEX[color]}"></span></button>`
-        )
+      readColorTags()
+        .map((tag) => {
+          const label = colorHint(tag.color);
+          return (
+            `<button type="button" class="r-filter-chip${active.has(tag.color) ? " on" : ""}" data-filter="${escapeHtml(
+              tag.color
+            )}" title="${escapeHtml(label)}"` +
+            `${colorHintLabel(tag.color) ? ` data-hint="${escapeHtml(colorHintLabel(tag.color))}"` : ""}>` +
+            `<span class="r-dotview" style="background:${colorHex(tag.color)}"></span></button>`
+          );
+        })
         .join("") +
       "</div>";
     if (!all.length) {
@@ -1827,9 +2390,10 @@
             <span class="r-badge-page">第 ${item.page} 页 · ${
               { note: "便签", highlight: "高亮", text: "文字", ink: "画笔" }[item.type] || "批注"
             }</span>
-            <span class="r-dotview ${item.color}" style="background:${
-              COLOR_HEX[item.color] || COLOR_HEX.yellow
-            }"></span>
+            <span class="r-dotview${
+              paletteKey(item.color) ? ` ${paletteKey(item.color)}` : ""
+            }" style="background:${colorHex(item.color)}"></span>
+            <span class="r-card-color">${escapeHtml(tagName(item.color))}</span>
             <button class="r-card-del" type="button" data-del="${item.id}" title="删除">✕</button>
           </div>
           ${item.text ? `<p class="r-card-quote">${escapeHtml(item.text.slice(0, 180))}</p>` : ""}
@@ -1839,6 +2403,100 @@
         </article>`
         )
         .join("");
+  }
+
+  /* ------------------------------------------------------ undo history -- */
+  /* Ctrl+Z takes back the last annotation change.  Every user-visible mutation
+     records a deep copy of the list just before it happens; 60 snapshots cover
+     a normal editing burst while staying cheap to hold. */
+  const HISTORY_LIMIT = 60;
+  const undoStack = [];
+  const redoStack = [];
+  let textEditHistory = null;
+
+  function historySnapshot() {
+    return { items: JSON.parse(JSON.stringify(state.items)) };
+  }
+
+  /* Timestamps change on every touch, so an undo step only counts as new when
+     the actual annotation content differs. */
+  function historyItemsEqual(a, b) {
+    const strip = (list) =>
+      (list || []).map((item) => {
+        const copy = { ...item };
+        delete copy.updated;
+        return copy;
+      });
+    return JSON.stringify(strip(a)) === JSON.stringify(strip(b));
+  }
+
+  function pushHistory(before) {
+    const entry = before || historySnapshot();
+    const top = undoStack[undoStack.length - 1];
+    /* A no-op mutation (same list as the last snapshot) must not add a step. */
+    if (top && historyItemsEqual(top.items, entry.items)) return;
+    undoStack.push(entry);
+    if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+    redoStack.length = 0;
+  }
+
+  /* Drop an open editor without committing it: the restored snapshot is the
+     source of truth, and a half-typed comment must not leak into it. */
+  function cancelEditorForHistory() {
+    textEditHistory = null;
+    if (state.editingId) {
+      hideTextFrame();
+      state.editingId = null;
+      document.body.classList.remove("editing-text");
+      updateTextbar();
+    }
+    el.editor.hidden = true;
+    state.activeId = null;
+    hideSelectionToolbar();
+    hideTip();
+    closeMenu();
+  }
+
+  function applyHistory(entry) {
+    state.items = JSON.parse(JSON.stringify(entry.items || []));
+    state.activeId = null;
+    state.editingId = null;
+    reindex();
+    persist();
+    if (!refreshMarginColumns()) refreshAnnotations();
+    renderNotesList();
+    refreshDock();
+    updateTextbar();
+  }
+
+  function undoAnnotation() {
+    if (!undoStack.length) {
+      toast("没有可撤回的批注");
+      return;
+    }
+    /* Close open editors first: a committed comment (or finished text edit)
+       becomes the step that the undo takes back, so no draft is dropped. */
+    if (state.editingId) endTextEdit();
+    if (!el.editor.hidden) closeEditor();
+    cancelEditorForHistory();
+    const entry = undoStack.pop();
+    redoStack.push(historySnapshot());
+    if (redoStack.length > HISTORY_LIMIT) redoStack.shift();
+    applyHistory(entry);
+    toast("已撤回上一步批注", "good");
+  }
+
+  function redoAnnotation() {
+    if (!redoStack.length) {
+      toast("没有可重做的批注");
+      return;
+    }
+    cancelEditorForHistory();
+    const entry = redoStack.pop();
+    undoStack.push(historySnapshot());
+    if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+    applyHistory(entry);
+    toast("已重做批注", "good");
   }
 
   let saveRevision = 0;
@@ -1932,6 +2590,7 @@
 
     state.items = items;
     reindex();
+    syncMarginColumns();
     renderNotesList();
     /* Pages may already be painted by the time annotations arrive, so repaint
        the marks instead of waiting for the next scroll or zoom. */
@@ -1942,7 +2601,8 @@
     }
   }
 
-  function addAnnotation(patch) {
+  function addAnnotation(patch, before) {
+    pushHistory(before);
     const now = Date.now() / 1000;
     const item = {
       id: uid(),
@@ -1960,18 +2620,20 @@
     };
     state.items.push(item);
     reindex();
+    refreshMarginColumns();
     persist();
     return item;
   }
 
-  function removeAnnotation(id) {
+  function removeAnnotation(id, record = true) {
     const index = state.items.findIndex((item) => item.id === id);
     if (index < 0) return;
+    if (record) pushHistory();
     const [item] = state.items.splice(index, 1);
     if (state.activeId === id) closeEditor(true);
     reindex();
     persist();
-    refreshAnnotations(pagesOfItem(item));
+    if (!refreshMarginColumns()) refreshAnnotations(pagesOfItem(item));
     renderNotesList();
   }
 
@@ -2063,6 +2725,10 @@
     el.selToolbar.hidden = true;
     state.pending = null;
     clearSync();
+    /* Hiding the toolbar must not clear the preview while the native selection
+       is still alive (it may be hidden for a menu or a tool switch). */
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) clearPickBands();
   }
 
   function onMouseUp(event) {
@@ -2083,23 +2749,150 @@
     }, 0);
   }
 
+  /* -------------------------------------------------- overlapping marks -- */
+  /* A second highlight over the same words multiplies into a darker, choppy
+     patch (the reported “blue over orange”).  Creating one therefore takes the
+     overlap out of the older highlights: pieces fully covered disappear, a
+     partly covered highlight keeps only its untouched ranges.  addAnnotation
+     snapshots the list *before* this runs, so one Ctrl+Z restores the previous
+     highlight(s) and removes the new one. */
+  function rangeInside(coverParts, part) {
+    const cover = (coverParts || []).find((entry) => entry.page === part.page);
+    return Boolean(cover && cover.start <= part.start && part.end <= cover.end);
+  }
+
+  function subtractRange(part, cut) {
+    if (cut.page !== part.page || cut.end <= part.start || cut.start >= part.end) return [part];
+    const pieces = [];
+    if (cut.start > part.start) {
+      pieces.push({ page: part.page, start: part.start, end: Math.min(cut.start, part.end) });
+    }
+    if (cut.end < part.end) {
+      pieces.push({ page: part.page, start: Math.max(cut.end, part.start), end: part.end });
+    }
+    return pieces;
+  }
+
+  /* Recompute an annotation's stored rectangles and quote from its ranges.
+     Live text layers are used where available; a page without one keeps no
+     stale rectangles, because bandsFor rebuilds them from the ranges. */
+  function refreshHighlightGeometry(item) {
+    const parts = item.ranges || [];
+    const rects = [];
+    const texts = [];
+    let complete = true;
+    for (const part of parts) {
+      const sheet = state.sheets[part.page - 1];
+      if (!sheet || !sheet.textReady) {
+        complete = false;
+        continue;
+      }
+      const box = sheet.box.getBoundingClientRect();
+      const pageRects = [];
+      for (const { rect, em } of annotationRects(sheet, { ranges: [part] })) {
+        const glyph = em ? Math.min(rect.height, em * 1.12) : rect.height;
+        pageRects.push({
+          x: (rect.left - box.left) / state.scale,
+          y: (rect.top + (rect.height - glyph) / 2 - box.top) / state.scale,
+          w: rect.width / state.scale,
+          h: glyph / state.scale,
+        });
+      }
+      for (const band of legacyBands(pageRects)) rects.push({ ...band, page: part.page });
+      texts.push(sheetText(sheet).slice(part.start, part.end));
+    }
+    item.rects = rects;
+    if (complete && texts.length) item.text = cleanText(texts.join("\n")).slice(0, 3000);
+    item.updated = Date.now() / 1000;
+  }
+
+  /* Trim/remove the older highlights the new selection overlaps.  Returns the
+     number of annotations that changed, so the caller can toast once. */
+  function mergeOverlappingHighlights(captured) {
+    const cuts = (captured && captured.parts) || [];
+    if (!cuts.length) return 0;
+    const replaced = [];
+    let changed = 0;
+    for (const item of state.items) {
+      if (item.type !== "highlight") continue;
+      const parts = item.ranges || [];
+      if (!parts.length) continue;
+      if (parts.every((part) => rangeInside(cuts, part))) {
+        replaced.push(item);
+        changed += 1;
+        continue;
+      }
+      const kept = [];
+      let touched = false;
+      for (const part of parts) {
+        let pieces = [part];
+        for (const cut of cuts) pieces = pieces.flatMap((piece) => subtractRange(piece, cut));
+        if (!pieces.length) {
+          touched = true;
+        } else if (
+          pieces.length !== 1 ||
+          pieces[0].start !== part.start ||
+          pieces[0].end !== part.end
+        ) {
+          touched = true;
+        }
+        kept.push(...pieces);
+      }
+      if (!touched) continue;
+      if (!kept.length) {
+        replaced.push(item);
+      } else {
+        item.ranges = kept;
+        refreshHighlightGeometry(item);
+      }
+      changed += 1;
+    }
+    if (!changed) return 0;
+    if (state.activeId && replaced.some((item) => item.id === state.activeId)) closeEditor(true);
+    if (replaced.length) {
+      state.items = state.items.filter((item) => !replaced.includes(item));
+    }
+    return changed;
+  }
+
   function highlightSelection(color, style) {
     const captured = state.pending;
     if (!captured) return null;
-    const item = addAnnotation({
-      type: "highlight",
-      page: captured.parts[0].page,
-      color,
-      style: style || document.querySelector("#highlight-style").value || "marker",
-      rects: captured.rects,
-      ranges: captured.parts,
-      text: captured.text,
-    });
+    /* The single hand button and every entry point resolve through the style
+       table, so the stored style and the painted family always agree. */
+    const requested = resolveHighlightStyle(style || control("highlight-style").value || "marker");
+    const resolvedStyle = HIGHLIGHT_FAMILIES[requested] ? requested : "marker";
+    /* Snapshot, then take the overlap out of the older highlights, then add the
+       new one: all of it is a single undo step. */
+    const before = historySnapshot();
+    const merged = mergeOverlappingHighlights(captured);
+    const item = addAnnotation(
+      {
+        type: "highlight",
+        page: captured.parts[0].page,
+        color,
+        style: resolvedStyle,
+        rects: captured.rects,
+        ranges: captured.parts,
+        text: captured.text,
+      },
+      before
+    );
+    rememberHighlightColor(color);
+    rememberHighlightStyle(resolvedStyle);
     const selection = window.getSelection();
     if (selection) selection.removeAllRanges();
+    /* The selection has been consumed by the new mark; drop its preview. */
+    clearPickBands();
     hideSelectionToolbar();
-    refreshAnnotations(captured.parts.map((part) => part.page));
+    if (!refreshMarginColumns()) {
+      refreshAnnotations(captured.parts.map((part) => part.page));
+    }
     renderNotesList();
+    if (merged) {
+      persist();
+      toast("已合并重叠高亮", "good");
+    }
     return item;
   }
 
@@ -2185,6 +2978,7 @@
     loadDrawingControls(item);
     el.editor.hidden = false;
     el.editorStyles.hidden = item.type !== "highlight";
+    syncHandPresetChips(item);
     el.editorPage.textContent = `第 ${item.page} 页 · ${({note:"便签",highlight:"高亮",text:"文字",ink:"画笔"}[item.type] || "批注")}`;
     el.editorQuote.textContent = item.text || "";
     el.editorQuote.hidden = !item.text;
@@ -2213,10 +3007,11 @@
     if (item && !skipCommit) {
       const text = el.editorText.value.trim();
       if (text !== item.comment) {
+        pushHistory();
         item.comment = text;
         item.updated = Date.now() / 1000;
         persist();
-        refreshAnnotations(pagesOfItem(item));
+        if (!refreshMarginColumns()) refreshAnnotations(pagesOfItem(item));
         renderNotesList();
       }
     }
@@ -2225,7 +3020,7 @@
     /* An empty text box would be invisible and un-clickable: drop it instead
        of leaving a stray annotation on the page. */
     if (item && item.type === "text" && !item.comment) {
-      removeAnnotation(item.id);
+      removeAnnotation(item.id, false);
       toast("空文字已移除", "good");
     }
   }
@@ -2355,7 +3150,7 @@
       if (["note", "text", "ink"].includes(item.type)) {
         lines.push(`- **${{note:"便签",text:"页面文字",ink:"笔迹（请导出 PDF 查看）"}[item.type]}**：${item.comment || "（空）"}`);
       } else {
-        lines.push(`- **高亮（${COLOR_LABEL[item.color] || ""}）**：${item.text || "（无选中文字）"}`);
+        lines.push(`- **高亮（${tagName(item.color)}）**：${item.text || "（无选中文字）"}`);
         if (item.comment) lines.push(`  > ${item.comment.replace(/\n+/g, " ")}`);
       }
       lines.push("");
@@ -2522,10 +3317,7 @@
     });
 
     el.sidebarBtn.addEventListener("click", () => {
-      const hidden = el.sidebar.hidden;
-      el.sidebar.hidden = !hidden;
-      el.sidebarBtn.setAttribute("aria-pressed", String(hidden));
-      if (state.fit) setTimeout(() => relayout(scrollAnchor()), 30);
+      setSidebarCollapsed(!el.sidebar.hidden);
     });
 
     for (const tab of el.tabs) {
@@ -2572,10 +3364,29 @@
 
 
     el.selToolbar.addEventListener("mousedown", (event) => event.preventDefault());
-    for (const dot of $$(".r-dot[data-color]", el.selToolbar)) {
-      dot.addEventListener("click", (event) => {
+    /* Delegated: the toolbar dots are re-rendered from readerPrefs.colorTags
+       whenever a tag is added, deleted or reordered. */
+    el.selToolbar.addEventListener("click", (event) => {
+      const add = event.target.closest("[data-add-tag]");
+      if (add) {
         event.stopPropagation();
-        highlightSelection(dot.dataset.color);
+        /* The picker lives off-screen; `state.pending` keeps the selection
+           alive while the native colour dialog is open. */
+        if (el.selColorPicker) el.selColorPicker.click();
+        return;
+      }
+      const dot = event.target.closest(".r-dot[data-color]");
+      if (!dot) return;
+      event.stopPropagation();
+      rememberHighlightColor(dot.dataset.color);
+      highlightSelection(dot.dataset.color);
+    });
+    if (el.selColorPicker) {
+      el.selColorPicker.addEventListener("change", () => {
+        const tag = addColorTagQuick(el.selColorPicker.value);
+        if (!tag) return;
+        const item = highlightSelection(tag.color);
+        if (!item) toast("选区已失效，请在正文里重新选中文字", "bad");
       });
     }
     el.selNote.addEventListener("click", (event) => {
@@ -2636,20 +3447,23 @@
     el.editorClose.addEventListener("click", () => closeEditor());
     el.editorDone.addEventListener("click", () => closeEditor());
     el.editorDelete.addEventListener("click", deleteActive);
-    for (const dot of $$(".r-dot", el.editorColors)) {
-      dot.addEventListener("click", () => {
-        const item = state.items.find((entry) => entry.id === state.activeId);
-        if (!item) return;
-        item.color = dot.dataset.color;
-        item.updated = Date.now() / 1000;
-        for (const other of $$(".r-dot", el.editorColors)) {
-          other.classList.toggle("on", other === dot);
-        }
-        persist();
-        refreshAnnotations(pagesOfItem(item));
-        renderNotesList();
-      });
-    }
+    /* Delegated: the editor dots are re-rendered from readerPrefs.colorTags. */
+    el.editorColors.addEventListener("click", (event) => {
+      const dot = event.target.closest(".r-dot[data-color]");
+      if (!dot) return;
+      rememberHighlightColor(dot.dataset.color);
+      const item = state.items.find((entry) => entry.id === state.activeId);
+      if (!item || item.color === dot.dataset.color) return;
+      pushHistory();
+      item.color = dot.dataset.color;
+      item.updated = Date.now() / 1000;
+      for (const other of $$(".r-dot", el.editorColors)) {
+        other.classList.toggle("on", other === dot);
+      }
+      persist();
+      refreshAnnotations(pagesOfItem(item));
+      renderNotesList();
+    });
 
     el.panelNotes.addEventListener("click", (event) => {
       const remove = event.target.closest("[data-del]");
@@ -2684,6 +3498,22 @@
       const typing =
         ["input", "textarea", "select"].includes(tag) || event.target.isContentEditable;
       if (typing) return;
+      const mod = event.ctrlKey || event.metaKey;
+      if (mod && !event.altKey) {
+        const pressed = String(event.key || "").toLowerCase();
+        if (pressed === "z") {
+          /* Ctrl+Shift+Z redoes, like Ctrl+Y on Windows. */
+          event.preventDefault();
+          if (event.shiftKey) redoAnnotation();
+          else undoAnnotation();
+          return;
+        }
+        if (pressed === "y") {
+          event.preventDefault();
+          redoAnnotation();
+          return;
+        }
+      }
       if ((event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "S")) {
         event.preventDefault();
         savePdf();
@@ -2748,6 +3578,8 @@
     highlighter: '<path d="M12.4 3.3 16.7 7.6 9.3 15H4.5v-4.8z"/><path d="M10.7 5 15 9.3M3.5 16.5h13"/>',
     crayon: '<path d="M7.6 15.6 4.4 12.4l6.9-8.8 3.1 3.1z"/><path d="m11.8 4.4 3.2 3.2M3.8 16.5h12.4"/>',
     hand: '<path d="M3.6 13.9c1.3-3.6 2.7-3.8 3.4-.9.7 2.9 2.1 3 3.2.5 1-2.4 2.4-2.6 3-.6.4 1.4 1.3 1.8 2.6 1.3"/>',
+    handSoft: '<path d="M3.7 12.7c2.7-1.5 5.2-1.5 7.9-.4 1.7.7 3.2.6 4.7-.2"/>',
+    handStrong: '<path d="M3.4 13.4c1.1-3 2.4-3.1 3.5-.5 1.1 2.7 2.4 2.8 3.5.2 1.1-2.7 2.4-2.8 3.5-.2 1.1 2.5 2.3 2.4 3.3.2"/>',
     underline: '<path d="M6.3 3.8v6.1a3.7 3.7 0 0 0 7.4 0V3.8M4.6 16.2h10.8"/>',
     pencil: '<path d="M14.1 3.6 16.4 5.9 7.4 14.9H5.1v-2.3z"/><path d="M4.2 17h6.4" stroke-dasharray="1.6 1.6"/>',
     wavy: '<path d="M3.4 10.6c1.6-2.4 3.2-2.4 4.8 0s3.2 2.4 4.8 0 3.2-2.4 4.6-.3"/>',
@@ -2769,6 +3601,83 @@
     return `<svg viewBox="0 0 20 20" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
   }
 
+  /* ------------------------------------------------------ style catalogue -- */
+  /* One explicit style id -> render-family table.  Every consumer (paint path,
+     toolbar/editor/menu buttons, labels, remembered style) reads this table,
+     so no style can accidentally fall through to a filled highlighter band and
+     an unknown id always renders as a plain colour band. */
+  const HIGHLIGHT_FAMILIES = {
+    marker: "band",
+    crayon: "crayon",
+    wavy: "wavy",
+    underline: "underline",
+    pencil: "pencil",
+    hand: "hand",
+    "hand-natural": "hand",
+    "hand-soft": "hand",
+    "hand-strong": "hand",
+  };
+  const HIGHLIGHT_STYLE_LABELS = {
+    marker: "荧光笔",
+    crayon: "蜡笔",
+    hand: "手绘下划线",
+    "hand-natural": "手绘下划线 · 自然",
+    "hand-soft": "手绘下划线 · 轻微",
+    "hand-strong": "手绘下划线 · 明显",
+    underline: "实线划线",
+    pencil: "铅笔划线",
+    wavy: "波浪线",
+  };
+  const HIGHLIGHT_STYLE_IDS = Object.keys(HIGHLIGHT_FAMILIES);
+  /* The one hand button applies the remembered preset; the presets themselves
+     live as chips in the annotation editor and the dock settings popover. */
+  const HAND_PRESETS = ["hand-soft", "hand", "hand-strong"];
+  const HAND_PRESET_LABELS = { "hand-soft": "轻微", hand: "自然", "hand-strong": "明显" };
+
+  function highlightFamily(style) {
+    return HIGHLIGHT_FAMILIES[String(style || "").toLowerCase()] || "band";
+  }
+
+  function highlightStyleLabel(style) {
+    const key = String(style || "").toLowerCase();
+    return HIGHLIGHT_STYLE_LABELS[key] || HIGHLIGHT_STYLE_LABELS[highlightFamily(key)] || "荧光笔";
+  }
+
+  function savedHandStyle() {
+    const value = String(readerPrefs.handStyle || "");
+    return HAND_PRESETS.includes(value) ? value : "hand";
+  }
+
+  function rememberHandStyle(style) {
+    if (!HAND_PRESETS.includes(style) || readerPrefs.handStyle === style) return;
+    readerPrefs.handStyle = style;
+    storePrefs();
+  }
+
+  function handPresetOf(style) {
+    const key = String(style || "").toLowerCase();
+    return key === "hand-soft" || key === "hand-strong" ? key : "hand";
+  }
+
+  function savedHighlightStyle() {
+    const value = String(readerPrefs.highlightStyle || "").toLowerCase();
+    return HIGHLIGHT_STYLE_IDS.includes(value) ? value : "marker";
+  }
+
+  function rememberHighlightStyle(style) {
+    const key = String(style || "").toLowerCase();
+    if (!HIGHLIGHT_FAMILIES[key] || readerPrefs.highlightStyle === key) return;
+    readerPrefs.highlightStyle = key;
+    storePrefs();
+  }
+
+  /* The single "hand" entry resolves to the remembered preset at creation time;
+     every other id is used verbatim. */
+  function resolveHighlightStyle(style) {
+    const key = String(style || "").toLowerCase();
+    return key === "hand" ? savedHandStyle() : key;
+  }
+
   /* ------------------------------------------------------ dock catalogue -- */
   const DOCK_ITEMS = {
     select: { kind: "tool", label: "选择 / 移动", icon: "select", hint: "V" },
@@ -2779,7 +3688,7 @@
     erase: { kind: "tool", label: "橡皮擦：整笔删除", icon: "erase", hint: "E" },
     marker: { kind: "style", label: "荧光笔", icon: "highlighter" },
     crayon: { kind: "style", label: "蜡笔", icon: "crayon" },
-    hand: { kind: "style", label: "手绘", icon: "hand" },
+    hand: { kind: "style", label: "手绘下划线", icon: "hand" },
     underline: { kind: "style", label: "实线划线", icon: "underline" },
     ink: { kind: "action", label: "墨色、粗细与不透明度", icon: "swatch" },
     font: { kind: "action", label: "字体与字号", icon: "font" },
@@ -2794,14 +3703,20 @@
     "marker", "crayon", "hand", "underline", "|",
     "ink", "font", "paper", "original", "legend", "layout", "settings",
   ];
+  /* What the three style hosts show.  One hand entry only; its three presets
+     are chips in the annotation editor and the dock settings popover. */
   const HIGHLIGHT_STYLES = [
-    { id: "marker", label: "荧光笔", icon: "highlighter" },
-    { id: "crayon", label: "蜡笔", icon: "crayon" },
-    { id: "hand", label: "手绘", icon: "hand" },
-    { id: "underline", label: "实线划线", icon: "underline" },
-    { id: "pencil", label: "铅笔划线", icon: "pencil" },
-    { id: "wavy", label: "波浪线", icon: "wavy" },
-  ];
+    { id: "marker", icon: "highlighter" },
+    { id: "crayon", icon: "crayon" },
+    { id: "hand", icon: "hand" },
+    { id: "underline", icon: "underline" },
+    { id: "pencil", icon: "pencil" },
+    { id: "wavy", icon: "wavy" },
+  ].map((entry) => ({
+    ...entry,
+    label: highlightStyleLabel(entry.id),
+    family: highlightFamily(entry.id),
+  }));
   const BUILTIN_FONTS = [
     { css: "sans-serif", label: "系统黑体" },
     { css: "serif", label: "系统宋体" },
@@ -2870,6 +3785,13 @@
     if (state.editingId) endTextEdit();
     drawingTool = tool;
     control("draw-tool").value = tool;
+    if (tool === "pen" || tool === "line") {
+      /* Red is the automatic ink colour; a colour picked from the popover is
+         remembered and comes back here. */
+      control("ink-color").value = savedInkColor();
+    } else if (tool === "text") {
+      control("ink-color").value = savedTextColor();
+    }
     el.pages.classList.toggle("drawing", tool !== "select");
     if (tool !== "select") {
       state.noteTool = false;
@@ -2890,20 +3812,38 @@
       button.setAttribute("aria-pressed", String(on));
     }
     const style = control("highlight-style").value || "marker";
+    const styleFamily = highlightFamily(style);
+    const handLabel = `手绘下划线 · ${HAND_PRESET_LABELS[savedHandStyle()]}`;
     for (const button of el.dock.querySelectorAll("[data-style]")) {
-      const on = button.dataset.style === style;
+      const on = button.dataset.style === style || (button.dataset.style === "hand" && styleFamily === "hand");
       button.classList.toggle("on", on);
       button.setAttribute("aria-pressed", String(on));
+      if (button.dataset.style === "hand") {
+        /* The entry is called 手绘下划线; only the tooltip names the preset. */
+        button.title = handLabel;
+        button.setAttribute("aria-label", "手绘下划线");
+      }
     }
     for (const button of $$("button.r-style-btn[data-style]")) {
-      const on = button.dataset.style === style;
+      const on = button.dataset.style === style || (button.dataset.style === "hand" && styleFamily === "hand");
       button.classList.toggle("on", on);
       button.setAttribute("aria-pressed", String(on));
+      if (button.dataset.style === "hand") {
+        /* The entry is called 手绘下划线; only the tooltip names the preset. */
+        button.title = handLabel;
+        button.setAttribute("aria-label", "手绘下划线");
+      }
     }
     const dot = control("dock-ink-dot");
     if (dot) {
       dot.style.background = control("ink-color").value;
       dot.style.opacity = String((+control("ink-opacity").value || 100) / 100);
+    }
+    const inkButton = el.dock.querySelector('[data-action="ink"]');
+    if (inkButton) {
+      const inkOn = drawingTool === "pen" || drawingTool === "line";
+      inkButton.classList.toggle("on", inkOn);
+      inkButton.setAttribute("aria-pressed", String(inkOn));
     }
     const paper = el.dock.querySelector('[data-action="paper"]');
     if (paper) paper.classList.toggle("on", (control("paper-theme").value || "white") !== "white");
@@ -2925,9 +3865,72 @@
   }
 
   function setHighlightStyle(style) {
-    if (!HIGHLIGHT_STYLES.some((item) => item.id === style)) return;
-    control("highlight-style").value = style;
+    const key = String(style || "").toLowerCase();
+    if (!HIGHLIGHT_FAMILIES[key]) return;
+    const resolved = resolveHighlightStyle(key);
+    control("highlight-style").value = resolved;
+    rememberHighlightStyle(resolved);
     control("highlight-style").dispatchEvent(new Event("input", { bubbles: true }));
+    refreshDock();
+  }
+
+  /* The 轻微 / 自然 / 明显 chips: the editor row (for an open hand highlight)
+     and the dock settings row both write the remembered preset. */
+  function handPresetChipsHtml() {
+    return HAND_PRESETS.map(
+      (id) =>
+        `<button type="button" class="r-hand-chip${savedHandStyle() === id ? " on" : ""}" ` +
+        `data-hand-preset="${id}" title="${HAND_PRESET_LABELS[id]}" ` +
+        `aria-label="${HAND_PRESET_LABELS[id]}" ` +
+        `aria-pressed="${savedHandStyle() === id}">${HAND_PRESET_LABELS[id]}</button>`
+    ).join("");
+  }
+
+  function syncHandPresetChips(item) {
+    const row = el.editorStyles ? el.editorStyles.querySelector("#editor-hand-presets") : null;
+    if (!row) return;
+    const target = item || state.items.find((entry) => entry.id === state.activeId) || null;
+    const show = Boolean(target && target.type === "highlight" && highlightFamily(target.style) === "hand");
+    row.hidden = !show;
+    if (!show) return;
+    const preset = handPresetOf(target.style);
+    for (const chip of row.querySelectorAll("[data-hand-preset]")) {
+      const on = chip.dataset.handPreset === preset;
+      chip.classList.toggle("on", on);
+      chip.setAttribute("aria-pressed", String(on));
+    }
+  }
+
+  function syncHandSettingsRow() {
+    const row = document.getElementById("pop-hand-style");
+    if (!row) return;
+    for (const chip of row.querySelectorAll("[data-hand-preset]")) {
+      const on = chip.dataset.handPreset === savedHandStyle();
+      chip.classList.toggle("on", on);
+      chip.setAttribute("aria-pressed", String(on));
+    }
+  }
+
+  /* Choosing a preset restyles the open hand highlight (when there is one) and
+     remembers the preset for the next hand mark. */
+  function applyHandPreset(preset) {
+    if (!HAND_PRESETS.includes(preset)) return;
+    rememberHandStyle(preset);
+    const item = state.items.find((entry) => entry.id === state.activeId);
+    if (item && item.type === "highlight" && highlightFamily(item.style) === "hand") {
+      if (item.style !== preset) {
+        pushHistory();
+        item.style = preset;
+        control("highlight-style").value = preset;
+        rememberHighlightStyle(preset);
+        commitDrawing(item);
+      }
+    } else if (highlightFamily(control("highlight-style").value) === "hand") {
+      control("highlight-style").value = preset;
+      rememberHighlightStyle(preset);
+    }
+    syncHandPresetChips(item);
+    syncHandSettingsRow();
     refreshDock();
   }
 
@@ -2936,6 +3939,14 @@
     readerPrefs.marginNotes = state.marginMode;
     storePrefs();
     document.body.classList.toggle("margin-notes", state.marginMode);
+    syncMarginColumns();
+    if (!state.marginMode) {
+      /* Off-screen pages are not repainted, so clear their rails here. */
+      for (const sheet of state.sheets) {
+        removeMarginLayer(sheet, "left");
+        removeMarginLayer(sheet, "right");
+      }
+    }
     if (state.fit) relayout(scrollAnchor());
     else refreshAnnotations();
     refreshDock();
@@ -2958,8 +3969,13 @@
 
   function loadDrawingControls(item) {
     if (item.type === "highlight") control("highlight-style").value = item.style || "marker";
-    if (["ink", "text"].includes(item.type)) {
-      control("ink-color").value = item.inkColor || "#30343b";
+    if (item.type === "ink") {
+      control("ink-color").value = item.inkColor || DEFAULT_INK;
+      control("ink-width").value = item.width || 2;
+      control("ink-opacity").value = (item.opacity ?? 1) * 100;
+    } else if (item.type === "text") {
+      /* Page text stays dark unless its own colour was chosen. */
+      control("ink-color").value = item.inkColor || LEGACY_INK;
       control("ink-width").value = item.width || 2;
       control("ink-opacity").value = (item.opacity ?? 1) * 100;
       control("text-size").value = item.fontSize || 18;
@@ -2968,7 +3984,10 @@
     refreshDock();
   }
 
-  function commitDrawing(item) {
+  function commitDrawing(item, before) {
+    /* Gestures and style edits pass the pre-change snapshot; a brand new
+       annotation has already recorded its history in addAnnotation. */
+    if (before) pushHistory(before);
     item.updated = Date.now() / 1000;
     reindex();
     refreshAnnotations([item.page]);
@@ -3136,6 +4155,7 @@
     closeEditor(true);
     hideSelectionToolbar();
     if (state.editingId) endTextEdit();
+    textEditHistory = historySnapshot();
     state.activeId = id;
     /* Render the plain version first, then flip the node itself into edit
        mode: re-rendering afterwards would drop the caret. */
@@ -3167,6 +4187,8 @@
   function endTextEdit() {
     if (!state.editingId) return;
     const id = state.editingId;
+    const before = textEditHistory;
+    textEditHistory = null;
     const item = state.items.find((entry) => entry.id === id);
     const node = textNode(id);
     if (item && node) {
@@ -3178,13 +4200,24 @@
     state.activeId = null;
     document.body.classList.remove("editing-text");
     updateTextbar();
+    if (marginRelayoutPending) {
+      marginRelayoutPending = false;
+      queueMarginRelayout();
+    }
     if (!item) return;
     if (!item.comment.trim()) {
-      removeAnnotation(id);
+      /* Clearing an older text box is undoable; cancelling a brand new empty
+         one is not worth a history entry. */
+      const existed =
+        before &&
+        before.items.some((entry) => entry.id === id && String(entry.comment || "").trim());
+      if (existed) pushHistory(before);
+      removeAnnotation(id, false);
       return;
     }
+    if (before && !historyItemsEqual(before.items, state.items)) pushHistory(before);
     reindex();
-    refreshAnnotations([item.page]);
+    if (!refreshMarginColumns()) refreshAnnotations([item.page]);
     renderNotesList();
     persist();
   }
@@ -3254,7 +4287,7 @@
       (item.points || []).map((p, i) => `${i ? "L" : "M"}${p.x * scale},${p.y * scale}`).join(" ")
     );
     path.setAttribute("fill", "none");
-    path.setAttribute("stroke", item.inkColor || "#30343b");
+    path.setAttribute("stroke", item.inkColor || DEFAULT_INK);
     path.setAttribute("stroke-width", (item.width || 2) * scale);
     path.setAttribute("stroke-opacity", item.opacity ?? 1);
     path.setAttribute("stroke-linecap", "round");
@@ -3275,6 +4308,8 @@
       event.preventDefault();
       const start = { x: event.clientX, y: event.clientY };
       const point = { ...item.point };
+      /* Snapshot before the drag: the commit only records one undo step. */
+      const historyBefore = historySnapshot();
       let moved = false;
       node.setPointerCapture(event.pointerId);
       const move = (e) => {
@@ -3299,7 +4334,7 @@
         }
         if (moved) {
           node.addEventListener("click", (e) => { e.stopImmediatePropagation(); e.preventDefault(); }, { once: true, capture: true });
-          commitDrawing(item);
+          commitDrawing(item, historyBefore);
         }
       };
       node.addEventListener("pointermove", move);
@@ -3337,25 +4372,180 @@
     return { x: point.x, y: point.y };
   }
 
-  function renderMarginCards(sheet) {
-    let layer = sheet.el.querySelector(":scope > .r-margin");
-    if (!state.marginMode) {
-      if (layer) layer.remove();
-      return;
+  /* A "card" is any annotation with narrative text.  It belongs to the rail on
+     the side of the page its anchor sits on, so a note about the left column no
+     longer points across the whole spread. */
+  function hasMarginCard(item) {
+    return Boolean(
+      (item.comment && item.comment.trim()) || item.type === "note" || item.type === "text"
+    );
+  }
+
+  /* Stored geometry is enough to decide the side (live bands are not available
+     for pages that have not been painted yet). */
+  function itemSideX(item) {
+    if (item.type === "highlight") {
+      const rects = (item.rects || []).filter((rect) => Number(rect.w) > 0);
+      if (rects.length) {
+        const first = rects.slice().sort((a, b) => a.y - b.y || a.x - b.x)[0];
+        return first.x + first.w / 2;
+      }
     }
+    return (item.point && item.point.x) || 0;
+  }
+
+  function marginSideOf(item) {
+    const page = item.page || 1;
+    const dims = state.dims.get(page) || state.base;
+    /* With the original half hidden the left column is off screen; keep the
+       pre-round-2 behaviour and use the right rail for everything. */
+    if (!originalVisible && dims.w > dims.h * 1.2) return "right";
+    return itemSideX(item) < dims.w / 2 ? "left" : "right";
+  }
+
+  /* The left rail only exists while a left-side card does, and the page has to
+     give that gutter back before the zoom is computed.  One function owns the
+     body class and the state flag so every mutation path stays consistent. */
+  function syncMarginColumns() {
+    const left = Boolean(
+      state.marginMode &&
+        state.items.some((item) => hasMarginCard(item) && marginSideOf(item) === "left")
+    );
+    const changed = left !== Boolean(state.marginLeft);
+    state.marginLeft = left;
+    document.body.classList.toggle("margin-left", left);
+    return changed;
+  }
+
+  /* A change of rail means a change of effective page width; the repaint is
+     deferred a frame so the caller can finish creating an annotation (and open
+     its editor) before pages are reset.  While page text is being edited the
+     repaint would recreate the contenteditable and drop the caret, so it waits
+     until the edit is committed. */
+  let marginRelayoutTimer = 0;
+  let marginRelayoutPending = false;
+  function queueMarginRelayout() {
+    if (!state.fit) return;
+    window.clearTimeout(marginRelayoutTimer);
+    marginRelayoutTimer = window.setTimeout(() => {
+      marginRelayoutTimer = 0;
+      if (state.editingId) {
+        marginRelayoutPending = true;
+        return;
+      }
+      relayout(scrollAnchor());
+    }, 40);
+  }
+
+  function refreshMarginColumns() {
+    if (!syncMarginColumns()) return false;
+    queueMarginRelayout();
+    return true;
+  }
+
+  function marginLayer(sheet, side) {
+    const cls = side === "left" ? "r-margin-left" : "r-margin-right";
+    let layer = sheet.el.querySelector(`:scope > .${cls}`);
     if (!layer) {
       layer = document.createElement("div");
-      layer.className = "r-margin";
+      layer.className = `r-margin ${cls}`;
       sheet.el.append(layer);
     }
-    const items = (state.byPage.get(sheet.no) || []).filter(
-      (item) => (item.comment && item.comment.trim()) || item.type === "note" || item.type === "text"
-    );
+    return layer;
+  }
+
+  function removeMarginLayer(sheet, side) {
+    const cls = side === "left" ? "r-margin-left" : "r-margin-right";
+    const layer = sheet.el.querySelector(`:scope > .${cls}`);
+    if (layer) layer.remove();
+  }
+
+  function renderMarginCards(sheet) {
+    if (!state.marginMode) {
+      removeMarginLayer(sheet, "left");
+      removeMarginLayer(sheet, "right");
+      return;
+    }
+    const items = (state.byPage.get(sheet.no) || []).filter(hasMarginCard);
+    if (!items.length) {
+      removeMarginLayer(sheet, "left");
+      removeMarginLayer(sheet, "right");
+      return;
+    }
+    const sides = { left: [], right: [] };
+    for (const item of items) sides[marginSideOf(item)].push(item);
+    for (const side of ["left", "right"]) {
+      if (!sides[side].length) {
+        removeMarginLayer(sheet, side);
+        continue;
+      }
+      placeMarginCards(sheet, marginLayer(sheet, side), side, sides[side]);
+    }
+  }
+
+  /* Left-side cards connect from the start of the first annotated line, so the
+     leader never crosses the highlighted sentence itself. */
+  function leftAnchor(item, sheet) {
+    if (item.type === "highlight") {
+      const bands = bandsFor(item, sheet);
+      if (bands && bands.length) return { x: bands[0].x, y: bands[0].y + bands[0].h / 2 };
+    }
+    return itemAnchor(item, sheet);
+  }
+
+  /* Leader lanes inside the 18px rail gutter, ordered from the card edge (15)
+     back to the page edge (3).  Cards are laid out top to bottom, so a leader
+     whose anchor is higher always gets a lane closer to the card: the parallel
+     runs stay apart and never have to cross each other. */
+  const MLINK_CHANNELS = [15, 12, 9, 6, 3];
+  const MLINK_CORNER = 6;
+
+  /* Orthogonal polyline with rounded corners.  Every interior vertex becomes a
+     quadratic turn whose radius is clamped to half of the shorter neighbour, so
+     an almost straight pair of turns still yields a valid path (only a
+     byte-identical duplicate vertex is dropped). */
+  function roundedLeaderPath(points, radius) {
+    const pts = [];
+    for (const point of points) {
+      const last = pts[pts.length - 1];
+      if (last && last.x === point.x && last.y === point.y) continue;
+      pts.push(point);
+    }
+    const round = (value) => Math.round(value * 100) / 100;
+    let d = `M${round(pts[0].x)} ${round(pts[0].y)}`;
+    for (let i = 1; i < pts.length - 1; i += 1) {
+      const prev = pts[i - 1];
+      const cur = pts[i];
+      const next = pts[i + 1];
+      const inLen = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+      const outLen = Math.hypot(next.x - cur.x, next.y - cur.y);
+      const r = Math.min(radius, inLen / 2, outLen / 2);
+      const beforeX = cur.x + ((prev.x - cur.x) / inLen) * r;
+      const beforeY = cur.y + ((prev.y - cur.y) / inLen) * r;
+      const afterX = cur.x + ((next.x - cur.x) / outLen) * r;
+      const afterY = cur.y + ((next.y - cur.y) / outLen) * r;
+      d += ` L${round(beforeX)} ${round(beforeY)} Q${round(cur.x)} ${round(cur.y)} ${round(
+        afterX
+      )} ${round(afterY)}`;
+    }
+    const end = pts[pts.length - 1];
+    d += ` L${round(end.x)} ${round(end.y)}`;
+    return d;
+  }
+
+  function placeMarginCards(sheet, layer, side, items) {
     layer.replaceChildren();
-    if (!items.length) return;
+    const mirror = side === "left";
     const scale = state.scale;
     const pageWidth = sheet.width;
+    const layerWidth = layer.offsetWidth || 238;
     const sorted = items.slice().sort((a, b) => itemAnchorY(a, sheet) - itemAnchorY(b, sheet));
+    /* One distinct gutter lane per leader, following the sorted (top to bottom)
+       card order; the offsets repeat when there are more leaders than lanes. */
+    const lanes = new Map();
+    sorted.forEach((item, index) => {
+      lanes.set(item, MLINK_CHANNELS[index % MLINK_CHANNELS.length]);
+    });
     let bottom = -Infinity;
     for (const item of sorted) {
       const card = document.createElement("button");
@@ -3367,9 +4557,7 @@
       card.style.top = `${top}px`;
       const kindLabel = { highlight: "高亮", note: "便签", text: "文字", ink: "画笔" }[item.type] || "批注";
       const styleLabel =
-        item.type === "highlight"
-          ? ` · ${(HIGHLIGHT_STYLES.find((s) => s.id === (item.style || "marker")) || {}).label || ""}`
-          : "";
+        item.type === "highlight" ? ` · ${highlightStyleLabel(item.style)}` : "";
       card.innerHTML =
         `<span class="r-mcard-top"><span class="r-dotview" style="background:${
           COLOR_HEX[item.color] || COLOR_HEX.yellow
@@ -3379,35 +4567,57 @@
       card.addEventListener("click", () => focusAnnotation(item.id));
       layer.append(card);
 
-      /* Draw the leader from the sentence to the card.  Cards are stacked to
-         avoid overlap, so the link often runs diagonally — a straight line at
-         the card's own y would point at the wrong row. */
-      const anchor = itemAnchor(item, sheet);
+      /* Leader from the sentence to its card: a horizontal exit at the anchor's
+         own y, a vertical run inside the 18px gutter (one lane per card, so the
+         parallel runs cannot overlap) and a horizontal run into the card's
+         connection point.  Corners are rounded; the left rail mirrors the right
+         one: the dot sits on the annotation, the line ends at the card. */
+      const anchor = mirror ? leftAnchor(item, sheet) : itemAnchor(item, sheet);
       const x1 = anchor.x * scale;
       const y1 = anchor.y * scale;
-      const x2 = pageWidth + 18;
       const y2 = top + 17;
-      const boxLeft = Math.min(x1, x2);
-      const boxTop = Math.min(y1, y2);
-      const width = Math.max(2, Math.abs(x2 - x1));
-      const height = Math.max(2, Math.abs(y2 - y1));
+      /* Convert page coordinates into the rail's own coordinate space: the
+         right rail starts at the page's right edge, the left rail at the
+         sheet's left edge minus its width.  In translation-only mode the page
+         is shifted left by half its width, which the right formula already
+         absorbs; left cards are never used in that mode. */
+      const x1Local = mirror ? x1 + layerWidth : x1 - pageWidth;
+      const x2Local = mirror ? layerWidth - 18 : 18;
+      /* Local x of the vertical lane: [0, 18) is the gutter on the right rail,
+         mirrored around the rail width on the left one, so a lane is always
+         between the page edge and the cards. */
+      const laneX = mirror ? layerWidth - lanes.get(item) : lanes.get(item);
+      const corners = [
+        { x: x1Local, y: y1 },
+        { x: laneX, y: y1 },
+        { x: laneX, y: y2 },
+        { x: x2Local, y: y2 },
+      ];
+      const xs = corners.map((point) => point.x);
+      const ys = corners.map((point) => point.y);
+      const boxLeft = Math.min(...xs);
+      const boxTop = Math.min(...ys);
+      const width = Math.max(2, Math.max(...xs) - boxLeft);
+      const height = Math.max(2, Math.max(...ys) - boxTop);
       const link = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       link.classList.add("r-mlink");
       link.setAttribute("width", String(width));
       link.setAttribute("height", String(height));
-      link.style.left = `${boxLeft - pageWidth}px`;
+      link.style.left = `${boxLeft}px`;
       link.style.top = `${boxTop}px`;
-      const bend = Math.max(16, Math.min(64, width * 0.45));
+      const local = corners.map((point) => ({ x: point.x - boxLeft, y: point.y - boxTop }));
+      /* The first turn must not round back over the page edge, so its radius is
+         capped by the lane's distance from the page (3px for the last lane). */
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
       path.setAttribute(
         "d",
-        `M0 ${y1 - boxTop} C ${bend} ${y1 - boxTop}, ${width - bend} ${y2 - boxTop}, ${width} ${y2 - boxTop}`
+        roundedLeaderPath(local, Math.min(MLINK_CORNER, lanes.get(item)))
       );
       path.setAttribute("stroke", COLOR_HEX[item.color] || COLOR_HEX.yellow);
       link.append(path);
       const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      dot.setAttribute("cx", "0");
-      dot.setAttribute("cy", String(y1 - boxTop));
+      dot.setAttribute("cx", String(local[0].x));
+      dot.setAttribute("cy", String(local[0].y));
       dot.setAttribute("r", "2.8");
       dot.setAttribute("fill", COLOR_HEX[item.color] || COLOR_HEX.yellow);
       link.append(dot);
@@ -3420,9 +4630,35 @@
   }
 
   /* --------------------------------------------------- sidebar resize -- */
+  /* The top bar has a toggle, but the sidebar itself also needs an obvious way
+     out: a slim handle on its right edge collapses it, and a floating tab at
+     the stage's left edge brings it back.  Both drive this one function so the
+     top-bar button, the handle and the stored preference never disagree. */
+  function setSidebarCollapsed(hidden, remember = true) {
+    const value = Boolean(hidden);
+    el.sidebar.hidden = value;
+    document.body.classList.toggle("side-collapsed", value);
+    if (el.sidebarBtn) {
+      el.sidebarBtn.setAttribute("aria-pressed", String(!value));
+      el.sidebarBtn.title = value ? "显示侧栏" : "隐藏侧栏";
+    }
+    if (el.sideHandle) el.sideHandle.setAttribute("aria-expanded", String(!value));
+    if (el.sideExpand) el.sideExpand.hidden = !value;
+    if (remember) {
+      readerPrefs.sidebarHidden = value;
+      storePrefs();
+    }
+    if (state.fit && state.sheets.length) {
+      window.setTimeout(() => relayout(scrollAnchor()), 30);
+    }
+  }
+
   function setupSidebarResize() {
     const width = clamp(Number(readerPrefs.sidebarWidth) || 178, 160, 440);
     el.sidebar.style.width = `${width}px`;
+    if (el.sideHandle) el.sideHandle.addEventListener("click", () => setSidebarCollapsed(true));
+    if (el.sideExpand) el.sideExpand.addEventListener("click", () => setSidebarCollapsed(false));
+    setSidebarCollapsed(readerPrefs.sidebarHidden === true, false);
     const handle = el.sideResize;
     if (!handle) return;
     let startX = 0;
@@ -3500,6 +4736,9 @@
     document.body.classList.toggle("margin-notes", state.marginMode);
     state.colorFilter = new Set(Array.isArray(readerPrefs.colorFilter) ? readerPrefs.colorFilter : []);
 
+    /* Restore the remembered ink colour; red is the automatic default. */
+    control("ink-color").value = savedInkColor();
+
     window.addEventListener("beforeunload", (event) => {
       const active = state.items.find((item) => item.id === state.activeId);
       if (
@@ -3549,6 +4788,9 @@
     }
     control("paper-theme").value = readerPrefs.paper || "white";
     control("paper-color").value = readerPrefs.paperColor || "#f3ecda";
+    /* Restore the last highlight style so a colour-dot highlight after a reload
+       keeps the style the reader chose (hand preset included). */
+    control("highlight-style").value = savedHighlightStyle();
     control("paper-theme").onchange = applyPaper;
     control("paper-color").oninput = () => {
       control("paper-theme").value = "custom";
@@ -3571,40 +4813,59 @@
     }
 
     /* ----------------------------------------------------- colour tags -- */
-    const labels = {
-      ...DEFAULT_COLOR_LABELS,
-      ...readerPrefs.labels,
-    };
     control("color-hints").checked = readerPrefs.hints !== false;
     function updateHints() {
       const on = control("color-hints").checked;
       document
         .querySelectorAll(".r-dot[data-color], [data-menu-color], .r-filter-chip[data-filter]")
         .forEach((node) => {
-          const color = node.dataset.color || node.dataset.menuColor || node.dataset.filter;
-          if (!COLOR_HEX[color]) return;
-          const semantic = labels[color] || "";
-          const label = on && semantic ? `${COLOR_LABEL[color]} · ${semantic}` : COLOR_LABEL[color];
+          const value = node.dataset.color || node.dataset.menuColor || node.dataset.filter;
+          const color = colorValue(value);
+          if (!color) return;
+          const base = colorName(color);
+          const semantic = tagName(color);
+          const showHint = on && base && semantic && base !== semantic;
+          const label = on && showHint ? `${base} · ${semantic}` : base || semantic;
           node.title = label;
           node.setAttribute("aria-label", label);
-          if (on && semantic) node.dataset.hint = semantic;
+          if (showHint) node.dataset.hint = semantic;
           else delete node.dataset.hint;
         });
-      readerPrefs.labels = labels;
       readerPrefs.hints = on;
       storePrefs();
     }
     control("color-hints").onchange = updateHints;
+    /* The toolbar / editor dot rows are containers: render them from the tags. */
+    renderColorDots();
     updateHints();
 
     /* ------------------------------------------------------- controls -- */
     function applyControlChange(id) {
+      if (id === "ink-color") {
+        /* Remember the pick per surface: ink strokes and page text each keep
+           their own last colour. */
+        const editing = state.items.find((entry) => entry.id === state.activeId);
+        const slot =
+          drawingTool === "text" || (editing && editing.type === "text")
+            ? "textColor"
+            : "inkColor";
+        readerPrefs[slot] = control("ink-color").value.toLowerCase();
+        storePrefs();
+      }
+      if (id === "highlight-style") rememberHighlightStyle(control("highlight-style").value);
       refreshDock();
       const item = state.items.find((entry) => entry.id === state.activeId);
-      if (!item) return;
+      if (!item) {
+        if (id === "highlight-style") syncHandPresetChips(null);
+        return;
+      }
       if (item.type === "highlight") {
-        item.style = control("highlight-style").value;
+        const style = control("highlight-style").value;
+        if (item.style === style) return;
+        pushHistory();
+        item.style = style;
         commitDrawing(item);
+        syncHandPresetChips(item);
         return;
       }
       if (!["text", "ink"].includes(item.type)) return;
@@ -3624,7 +4885,11 @@
         persist();
         return;
       }
-      Object.assign(item, drawingOptions());
+      const patch = drawingOptions();
+      const changed = Object.keys(patch).some((key) => item[key] !== patch[key]);
+      if (!changed) return;
+      pushHistory();
+      Object.assign(item, patch);
       commitDrawing(item);
     }
     for (const id of ["ink-color", "ink-width", "ink-opacity", "text-font", "text-size", "highlight-style"]) {
@@ -3659,6 +4924,16 @@
       el.pop.style.left = `${left}px`;
       el.pop.style.top = `${top}px`;
     }
+    /* Popover content can grow while it is open (a tag is added, a long list
+       finishes rendering).  Growing downwards is positioned from the top, so the
+       box would start covering the dock button that toggles it — re-anchor it
+       whenever its size changes. */
+    if (typeof ResizeObserver === "function") {
+      const popResize = new ResizeObserver(() => {
+        if (popAnchor && el.pop && !el.pop.hidden) positionPopover(popAnchor);
+      });
+      popResize.observe(el.pop);
+    }
     function openPopover(kind, anchor) {
       if (!el.pop || !anchor) return;
       if (popAnchor === anchor && !el.pop.hidden && el.pop.dataset.kind === kind) {
@@ -3682,7 +4957,7 @@
       return renderLegendPopover();
     }
 
-    const INK_COLORS = ["#30343b", "#6b7280", "#0a84ff", "#30b158", "#ff9f0a", "#ff375f", "#bf5af2", "#00c7be"];
+    const INK_COLORS = [DEFAULT_INK, LEGACY_INK, "#6b7280", "#0a84ff", "#30b158", "#ff9f0a", "#bf5af2", "#00c7be"];
     function renderInkPopover() {
       const current = control("ink-color").value.toLowerCase();
       el.pop.innerHTML =
@@ -3869,32 +5144,182 @@
       });
     }
 
+    /* ------------------------------------------------ colour tag manager -- */
+    /* One row per tag: drag handle, colour swatch, editable name, delete.  The
+       row order is the persisted tag order; pointer-drag reorders the DOM and
+       persists on drop. */
+    function tagRowHtml(tag, current) {
+      return (
+        `<div class="r-tag-row${tag.color === current ? " on" : ""}" data-tag-id="${escapeHtml(
+          tag.id
+        )}" data-tag-color="${escapeHtml(tag.color)}">` +
+        `<span class="r-tag-grip" data-tag-grip="${escapeHtml(
+          tag.id
+        )}" title="拖动排序" aria-hidden="true">⋮⋮</span>` +
+        `<span class="r-tag-swatch" style="background:${colorHex(
+          tag.color
+        )}" aria-hidden="true"></span>` +
+        `<input class="r-tag-name" data-legend="${escapeHtml(
+          tag.id
+        )}" data-tag-name="${escapeHtml(tag.id)}" maxlength="12" value="${escapeHtml(
+          tag.name
+        )}" spellcheck="false" aria-label="${escapeHtml(tag.color)}标签名称">` +
+        `<button class="r-tag-del" type="button" data-tag-delete="${escapeHtml(
+          tag.id
+        )}" title="删除标签（批注保留原颜色）" aria-label="删除标签">×</button>` +
+        "</div>"
+      );
+    }
+    function nextTagColor() {
+      const used = new Set(readColorTags().map((tag) => tag.color));
+      return Object.keys(COLOR_PALETTE).find((key) => !used.has(key)) || "#3aa0ff";
+    }
+    /* Every tag edit is saved immediately and refreshes the colour affordances
+       (toolbar dots, editor dots, hints, sidebar chips) in tag order. */
+    function refreshColorTagUi() {
+      renderColorDots();
+      updateHints();
+      renderNotesList();
+    }
+    function paintTagSelection() {
+      const current = savedHighlightColor();
+      for (const row of el.pop.querySelectorAll(".r-tag-row")) {
+        row.classList.toggle("on", row.dataset.tagColor === current);
+      }
+    }
+    function addColorTag(value, name) {
+      const color = normalizeTagColor(value);
+      if (!color) {
+        toast("请选择一个颜色", "bad");
+        return null;
+      }
+      const tags = readColorTags();
+      const trimmed = String(name == null ? "" : name).trim().slice(0, 12);
+      const finalName = trimmed || colorName(color) || colorHex(color);
+      const twin = tags.find((tag) => tag.color === color && tag.name === finalName);
+      if (twin) {
+        /* Same colour + same name: just select it instead of a duplicate dot. */
+        rememberHighlightColor(color);
+        refreshColorTagUi();
+        return twin;
+      }
+      const tag = { id: newColorTagId(), color, name: finalName };
+      writeColorTags([...tags, tag]);
+      rememberHighlightColor(color);
+      refreshColorTagUi();
+      return tag;
+    }
+    function deleteColorTag(id) {
+      const tags = readColorTags();
+      const tag = tags.find((entry) => entry.id === id);
+      if (!tag) return;
+      /* Only the tag goes away: annotations keep the colour value they stored. */
+      writeColorTags(tags.filter((entry) => entry.id !== id));
+      if (!readColorTags().some((entry) => entry.color === tag.color)) {
+        state.colorFilter.delete(tag.color);
+        readerPrefs.colorFilter = [...state.colorFilter];
+        storePrefs();
+      }
+      refreshColorTagUi();
+      renderLegendPopover();
+      toast(`已删除标签「${tag.name}」；已有批注保留原颜色`, "good");
+    }
+    function commitTagOrder(list) {
+      const order = [...list.querySelectorAll(".r-tag-row")].map((row) => row.dataset.tagId);
+      const tags = readColorTags();
+      const byId = new Map(tags.map((tag) => [tag.id, tag]));
+      const ordered = order.map((id) => byId.get(id)).filter(Boolean);
+      for (const tag of tags) if (!ordered.includes(tag)) ordered.push(tag);
+      writeColorTags(ordered);
+      refreshColorTagUi();
+    }
+    function bindTagDrag(list) {
+      list.addEventListener("pointerdown", (event) => {
+        const grip = event.target.closest("[data-tag-grip]");
+        if (!grip) return;
+        const row = grip.closest(".r-tag-row");
+        if (!row) return;
+        event.preventDefault();
+        row.classList.add("dragging");
+        const move = (moveEvent) => {
+          const under = document
+            .elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+            ?.closest?.(".r-tag-row");
+          if (!under || under === row || !list.contains(under)) return;
+          const rect = under.getBoundingClientRect();
+          const after = moveEvent.clientY > rect.top + rect.height / 2;
+          list.insertBefore(row, after ? under.nextSibling : under);
+        };
+        const stop = () => {
+          document.removeEventListener("pointermove", move);
+          document.removeEventListener("pointerup", stop);
+          document.removeEventListener("pointercancel", stop);
+          row.classList.remove("dragging");
+          commitTagOrder(list);
+        };
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", stop);
+        document.addEventListener("pointercancel", stop);
+      });
+    }
+
     function renderLegendPopover() {
-      const rows = Object.keys(COLOR_HEX)
-        .map(
-          (key) =>
-            `<label class="r-pop-item"><span class="r-dotview" style="background:${COLOR_HEX[key]}"></span>` +
-            `<span>${COLOR_LABEL[key]}</span>` +
-            `<input data-legend="${key}" maxlength="12" value="${escapeHtml(labels[key])}"></label>`
-        )
-        .join("");
+      const tags = readColorTags();
+      const current = savedHighlightColor();
+      const rows = tags.map((tag) => tagRowHtml(tag, current)).join("");
       el.pop.innerHTML =
         '<p class="r-pop-title">颜色标签</p>' +
-        '<p class="r-pop-sub">给每种颜色写一句用途说明，鼠标停在色点上就能看到。</p>' +
-        `<div class="r-pop-list">${rows}</div>` +
+        '<p class="r-pop-sub">拖动 ⋮⋮ 调整顺序；改名、删除只影响标签，已有批注保留原颜色。</p>' +
+        '<div class="r-tag-add">' +
+        '<input id="pop-tag-color" type="color" aria-label="新标签颜色" title="新标签颜色">' +
+        '<input id="pop-tag-name" maxlength="12" placeholder="新标签名称" spellcheck="false" aria-label="新标签名称">' +
+        '<button id="pop-tag-add" type="button">＋ 新增标签</button>' +
+        "</div>" +
+        `<div class="r-tag-list" id="pop-tags">${rows}</div>` +
         '<label class="r-pop-check"><input type="checkbox" id="pop-hints"> 显示功能提示</label>' +
         '<div class="r-settings-block"><span class="r-settings-label">批注显示</span>' +
         '<div class="r-segmented" id="pop-layout">' +
         `<button type="button" data-layout="page" class="${state.marginMode ? "" : "on"}">页面内</button>` +
         `<button type="button" data-layout="margin" class="${state.marginMode ? "on" : ""}">页边距</button>` +
         "</div></div>";
-      for (const input of el.pop.querySelectorAll("[data-legend]")) {
-        input.addEventListener("input", () => {
-          labels[input.dataset.legend] = input.value;
-          updateHints();
-          renderNotesList();
-        });
-      }
+      const list = el.pop.querySelector("#pop-tags");
+      const colorInput = el.pop.querySelector("#pop-tag-color");
+      const nameInput = el.pop.querySelector("#pop-tag-name");
+      colorInput.value = nextTagColor();
+      bindTagDrag(list);
+      list.addEventListener("input", (event) => {
+        const input = event.target.closest("[data-tag-name]");
+        if (!input) return;
+        const tag = readColorTags().find((entry) => entry.id === input.dataset.tagName);
+        if (!tag || tag.name === input.value) return;
+        tag.name = input.value;
+        writeColorTags(readColorTags());
+        updateHints();
+        renderNotesList();
+      });
+      list.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-tag-delete]");
+        if (!button) return;
+        event.stopPropagation();
+        deleteColorTag(button.dataset.tagDelete);
+      });
+      const add = () => {
+        const tag = addColorTag(colorInput.value, nameInput.value);
+        if (!tag) return;
+        if (!list.querySelector(`[data-tag-id="${tag.id}"]`)) {
+          list.insertAdjacentHTML("beforeend", tagRowHtml(tag, savedHighlightColor()));
+        }
+        paintTagSelection();
+        /* The new tag is selected: the next highlight uses its colour. */
+        nameInput.value = "";
+        colorInput.value = nextTagColor();
+      };
+      el.pop.querySelector("#pop-tag-add").addEventListener("click", add);
+      nameInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        add();
+      });
       const hints = el.pop.querySelector("#pop-hints");
       hints.checked = control("color-hints").checked;
       hints.addEventListener("change", () => {
@@ -3948,6 +5373,15 @@
         `<button type="button" data-layout="page" class="${state.marginMode ? "" : "on"}">页面内</button>` +
         `<button type="button" data-layout="margin" class="${state.marginMode ? "on" : ""}">页边距</button>` +
         "</div></div>" +
+        '<div class="r-settings-block"><span class="r-settings-label">手绘下划线笔触</span>' +
+        '<div class="r-segmented" id="pop-hand-style">' +
+        HAND_PRESETS.map(
+          (id) =>
+            `<button type="button" data-hand-preset="${id}" class="${
+              savedHandStyle() === id ? "on" : ""
+            }" aria-pressed="${savedHandStyle() === id}">${HAND_PRESET_LABELS[id]}</button>`
+        ).join("") +
+        "</div></div>" +
         '<button class="r-pop-btn" type="button" id="pop-dock-reset">恢复默认工具栏</button>';
       el.pop.querySelector(".r-settings-list").addEventListener("click", (event) => {
         const move = event.target.closest("[data-move]");
@@ -3974,6 +5408,17 @@
         applyMarginMode(button.dataset.layout === "margin");
         for (const other of el.pop.querySelectorAll("[data-layout]")) other.classList.toggle("on", other === button);
       });
+      const handRow = el.pop.querySelector("#pop-hand-style");
+      if (handRow) {
+        handRow.addEventListener("click", (event) => {
+          const button = event.target.closest("[data-hand-preset]");
+          if (!button) return;
+          applyHandPreset(button.dataset.handPreset);
+          for (const other of handRow.querySelectorAll("[data-hand-preset]")) {
+            other.classList.toggle("on", other === button);
+          }
+        });
+      }
       el.pop.querySelector("#pop-dock-reset").addEventListener("click", () => {
         readerPrefs.dock = { order: [...DOCK_DEFAULT], hidden: [] };
         storePrefs();
@@ -4003,7 +5448,7 @@
       (event) => {
         if (!popAnchor || el.pop.hidden) return;
         const target = event.target instanceof Element ? event.target : null;
-        if (target && (target.closest("#r-pop") || target === popAnchor)) return;
+        if (target && (target.closest("#r-pop") || (popAnchor && popAnchor.contains(target)))) return;
         closePopover();
       },
       true
@@ -4211,7 +5656,7 @@
     function styleMenuHtml() {
       return HIGHLIGHT_STYLES.map(
         (style) =>
-          `<button type="button" class="r-menu-style" data-menu-style="${style.id}">${icon(
+          `<button type="button" class="r-menu-style" data-menu-style="${style.id}" data-family="${style.family}">${icon(
             style.icon,
             15
           )}<span>${style.label}</span></button>`
@@ -4222,13 +5667,8 @@
       el.menu.innerHTML =
         `<div class="r-menu-title"><span>标记所选文字</span><span>${captured.text.length} 字</span></div>` +
         `<div class="r-menu-styles">${styleMenuHtml()}</div>` +
-        `<div class="r-menu-colors">${Object.keys(COLOR_HEX)
-          .map(
-            (color) =>
-              `<button class="r-dot ${color}" type="button" data-menu-color="${color}" title="${escapeHtml(
-                colorHint(color)
-              )}"${colorHintLabel(color) ? ` data-hint="${escapeHtml(colorHintLabel(color))}"` : ""}></button>`
-          )
+        `<div class="r-menu-colors">${readColorTags()
+          .map((tag) => colorDotHtml(tag.color, "data-menu-color"))
           .join("")}</div>` +
         '<hr class="r-menu-hr">' +
         `<button type="button" class="r-menu-item" data-menu-act="note-save">${icon("note", 14)}存为笔记</button>` +
@@ -4244,7 +5684,7 @@
         if (styleButton) {
           const style = styleButton.dataset.menuStyle;
           setHighlightStyle(style);
-          const item = highlightSelection("yellow", style);
+          const item = highlightSelection(savedHighlightColor(), resolveHighlightStyle(style));
           if (item) {
             el.menu.hidden = true;
             toast("已高亮所选文字", "good");
@@ -4252,6 +5692,7 @@
           return;
         }
         if (colorButton) {
+          rememberHighlightColor(colorButton.dataset.menuColor);
           const item = highlightSelection(colorButton.dataset.menuColor);
           if (item) {
             el.menu.hidden = true;
@@ -4306,13 +5747,8 @@
           ? `<button type="button" class="r-menu-item" data-menu-act="edit">${icon("edit", 14)}编辑文字</button>`
           : `<button type="button" class="r-menu-item" data-menu-act="edit">${icon("edit", 14)}打开批注</button>`) +
         (item.type === "highlight"
-          ? `<div class="r-menu-colors">${Object.keys(COLOR_HEX)
-              .map(
-                (color) =>
-                  `<button class="r-dot ${color}" type="button" data-menu-color="${color}" title="${escapeHtml(
-                colorHint(color)
-              )}"${colorHintLabel(color) ? ` data-hint="${escapeHtml(colorHintLabel(color))}"` : ""}></button>`
-              )
+          ? `<div class="r-menu-colors">${readColorTags()
+              .map((tag) => colorDotHtml(tag.color, "data-menu-color"))
               .join("")}</div>`
           : "") +
         `<button type="button" class="r-menu-item" data-menu-act="delete">${icon("trash", 14)}删除</button>`;
@@ -4320,11 +5756,14 @@
       el.menu.onclick = (click) => {
         const color = click.target.closest("[data-menu-color]");
         if (color) {
-          item.color = color.dataset.menuColor;
-          item.updated = Date.now() / 1000;
-          persist();
-          refreshAnnotations(pagesOfItem(item));
-          renderNotesList();
+          if (item.color !== color.dataset.menuColor) {
+            pushHistory();
+            item.color = color.dataset.menuColor;
+            item.updated = Date.now() / 1000;
+            persist();
+            refreshAnnotations(pagesOfItem(item));
+            renderNotesList();
+          }
           el.menu.hidden = true;
           return;
         }
@@ -4486,17 +5925,43 @@
   function renderStyleButtons() {
     const markup = HIGHLIGHT_STYLES.map(
       (style) =>
-        `<button type="button" class="r-style-btn" data-style="${style.id}" title="${style.label}" aria-label="${style.label}" aria-pressed="false">${icon(style.icon, 13)}</button>`
+        `<button type="button" class="r-style-btn" data-style="${style.id}" data-family="${style.family}" title="${style.label}" aria-label="${style.label}" aria-pressed="false">${icon(style.icon, 13)}</button>`
     ).join("");
+    /* The three hand presets are chips next to the editor's style buttons and
+       only appear while a hand highlight is open. */
+    const handChips =
+      '<div class="r-editor-hand" id="editor-hand-presets" hidden>' +
+      '<span class="r-editor-hand-label">笔触</span>' +
+      handPresetChipsHtml() +
+      "</div>";
     if (el.selStyles) el.selStyles.innerHTML = markup;
-    if (el.editorStyles) el.editorStyles.innerHTML = markup;
+    if (el.editorStyles) el.editorStyles.innerHTML = markup + handChips;
     for (const host of [el.selStyles, el.editorStyles]) {
       if (!host) continue;
+      /* Picking a style with text selected must leave a mark right away; in the
+         annotation editor the same buttons restyle the open annotation. */
+      const appliesToSelection = host === el.selStyles;
       host.addEventListener("click", (event) => {
         const button = event.target.closest("[data-style]");
         if (!button) return;
         event.stopPropagation();
-        setHighlightStyle(button.dataset.style);
+        const style = button.dataset.style;
+        setHighlightStyle(style);
+        if (!appliesToSelection) return;
+        if (!state.pending) return;
+        const item = highlightSelection(savedHighlightColor(), style);
+        if (!item) return;
+        hideSelectionToolbar();
+        toast("已标记所选文字", "good");
+      });
+    }
+    const chips = el.editorStyles ? el.editorStyles.querySelector("#editor-hand-presets") : null;
+    if (chips) {
+      chips.addEventListener("click", (event) => {
+        const chip = event.target.closest("[data-hand-preset]");
+        if (!chip) return;
+        event.stopPropagation();
+        applyHandPreset(chip.dataset.handPreset);
       });
     }
   }
@@ -4649,6 +6114,9 @@
     },
     version: 1,
   };
+
+  /* Closing the tab must flush the last page even inside the 3 s throttle. */
+  window.addEventListener("pagehide", () => reportReadingPosition(true));
 
   bindEvents();
   setupReaderTools();

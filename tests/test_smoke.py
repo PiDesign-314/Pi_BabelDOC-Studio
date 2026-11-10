@@ -79,6 +79,10 @@ def test_build_command() -> None:
         assert fragment in joined, fragment
     assert cmd.count("--files") == 2
     assert "--no-dual" in runner.build_command({**cfg, "dual_mode": "mono"}, [], "x")
+    # 兼容性优先 turns off rich-text placeholders for long/blank-prone papers.
+    assert "--disable-rich-text-translate" not in cmd
+    compat = runner.build_command({**cfg, "compat_first": True}, [], "x")
+    assert "--disable-rich-text-translate" in compat
     print("PASS  command assembly")
 
 

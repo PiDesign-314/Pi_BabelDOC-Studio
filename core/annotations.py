@@ -27,12 +27,35 @@ COLORS = {
     "teal",
     "red",
 }
+# The reader lets users manage their own colour tags, including custom colours.
+# A tag colour is either one of the palette keys above or a plain "#rrggbb".
+CUSTOM_COLOR = re.compile(r"^#[0-9a-f]{6}$")
+
+
+def normalize_color(value) -> str:
+    """Return a safe annotation colour: a palette key, "#rrggbb", or yellow."""
+    text = str(value or "").strip().lower()
+    if text in COLORS:
+        return text
+    if CUSTOM_COLOR.match(text):
+        return text
+    return "yellow"
 MAX_ITEMS = 4000
 MAX_RECTS = 240
 MAX_RANGES = 32
-# marker/hand/crayon paint a band of colour, underline/pencil/wavy paint a line
-# under the text.  The reader offers all six; PDF export groups them.
-STYLES = {"marker", "crayon", "hand", "underline", "pencil", "wavy"}
+# marker/crayon paint a band of colour; hand/underline/pencil/wavy paint a
+# line under the text.  "hand" is the natural preset (legacy alias).
+STYLES = {
+    "marker",
+    "crayon",
+    "hand",
+    "hand-soft",
+    "hand-natural",
+    "hand-strong",
+    "underline",
+    "pencil",
+    "wavy",
+}
 
 
 def document_id(path: str | Path) -> str:
@@ -100,7 +123,7 @@ def _sanitize(items) -> list[dict]:
                 ).hexdigest()[:12])[:64],
                 "type": kind,
                 "page": int(_number(item.get("page"), 1, 100000)),
-                "color": color if color in COLORS else "yellow",
+                "color": normalize_color(color),
                 "style": item.get("style") if item.get("style") in STYLES else "marker",
                 "inkColor": item.get("inkColor") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(item.get("inkColor", ""))) else "#30343b",
                 "opacity": _number(item.get("opacity", 1), 0.05, 1),

@@ -717,3 +717,153 @@ body.lib-dragging { cursor: grabbing; }
 }
 .rail-item.drop-target .rail-name { font-weight: 600; }
 .rail-item.drop-target em { color: var(--accent) !important; }
+
+/* Zotero's read-only source list and PDF rows. */
+.rail-zotero {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  margin-top: 14px; padding: 3px 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--blue) 11%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--blue) 4%, var(--card));
+}
+.rail-zotero[hidden], .rail-zotero-hint[hidden] { display: none; }
+.rail-zotero .rail-head { margin-top: 7px; color: color-mix(in srgb, var(--blue) 38%, var(--text-2)); }
+.rail-zotero .rail-item.on {
+  background: color-mix(in srgb, var(--blue) 11%, var(--card));
+  color: color-mix(in srgb, var(--blue) 65%, var(--text));
+}
+.rail-zotero .rail-item.on em { color: inherit; }
+.rail-zotero-sync { margin: 0 8px 6px; color: var(--text-3); font-size: 11.5px; }
+.zotero-tree { min-width: 0; }
+.zot-coll { padding-left: calc(8px + var(--depth, 0) * 14px); }
+.zot-caret, .zot-caret-spacer { width: 14px; height: 20px; flex: none; }
+.zot-caret { display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px;
+  background: transparent; color: var(--text-3); cursor: pointer; }
+.zot-caret:hover { background: var(--fill-1); color: var(--text); }
+.zot-caret svg { transition: transform var(--dur-1) var(--ease-standard); }
+.zot-caret[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.zot-card { cursor: pointer; }
+.zot-card[aria-busy="true"] { opacity: 0.65; pointer-events: none; }
+.zot-thumb { padding: 0; cursor: pointer; }
+.zot-actions { display: flex; align-items: center; gap: 6px; padding-left: 8px; }
+.zot-btn { min-height: 30px; padding: 0 11px; border: 1px solid var(--line);
+  border-radius: 7px; background: var(--card); color: var(--text-2);
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.zot-btn:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.zot-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.zot-btn:focus-visible, .zot-caret:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lib-badge { display: inline-flex; align-items: center; min-height: 19px; padding: 0 7px;
+  border-radius: 5px; font-size: 11px; font-weight: 600; }
+.lib-badge.muted { background: var(--fill-1); color: var(--text-3); }
+.lib-badge.translated, .lib-badge.dual { background: var(--accent-soft); color: var(--accent); }
+.lib-badge.warn { background: var(--fill-1); color: var(--text-3); }
+@media (max-width: 720px) {
+  .zot-actions { grid-column: 1 / -1; justify-content: flex-end; padding-left: 0; }
+  .zotero-tree { width: 100%; }
+}
+
+/* Split read control: the main button keeps the automatic behaviour, the
+   caret opens the variant drop-down. */
+.zot-split { display: inline-flex; align-items: stretch; }
+.zot-split .zot-btn { border-radius: 7px 0 0 7px; }
+.zot-split .zot-btn + .zot-btn {
+  margin-left: -1px;
+  padding: 0 7px;
+  border-radius: 0 7px 7px 0;
+}
+.zot-split .zot-caret-btn { display: inline-grid; place-items: center; }
+.zot-split .zot-caret-btn svg { width: 10px; height: 10px; display: block; }
+.zot-split .zot-btn:hover,
+.zot-split .zot-btn:focus-visible { position: relative; z-index: 1; }
+
+/* Result rows: the read caret is a narrow icon button next to 阅读. */
+.lib-actions button.lib-caret { width: 22px; }
+.lib-actions button.lib-caret svg { width: 9px; height: 9px; }
+
+.zot-caret-btn[aria-expanded="true"],
+.lib-caret[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.zot-caret-btn[aria-expanded="true"] { border-color: var(--accent); }
+
+/* Floating menu used by the card context menu and the read drop-downs.
+   Fixed coordinates keep it independent of the scrolling grid; colours come
+   from the shared tokens, so light and dark themes both work. */
+.card-menu {
+  position: fixed;
+  z-index: 120;
+  min-width: 178px;
+  max-width: 300px;
+  max-height: min(62vh, 380px);
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--shadow-pop);
+  animation: lib-pop-in 0.12s var(--ease-out);
+}
+
+.card-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+}
+.card-menu-item:hover,
+.card-menu-item:focus-visible {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.card-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.card-menu-item[disabled] {
+  background: transparent;
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.card-menu-ico { flex: none; display: grid; place-items: center; color: var(--text-3); }
+.card-menu-ico svg { width: 14px; height: 14px; display: block; }
+.card-menu-item:hover .card-menu-ico,
+.card-menu-item:focus-visible .card-menu-ico { color: inherit; }
+
+.card-menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-menu-hint {
+  flex: none;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.card-menu-item:hover .card-menu-hint,
+.card-menu-item:focus-visible .card-menu-hint { color: inherit; opacity: 0.8; }
+
+.card-menu-mark { flex: none; display: grid; place-items: center; color: var(--accent); }
+.card-menu-mark svg { width: 12px; height: 12px; display: block; }
+
+.card-menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }

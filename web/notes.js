@@ -1064,7 +1064,7 @@
       return;
     }
     if (status === 0) {
-      showError("无法连接本地服务，请确认 BabelDOC Studio 仍在运行。");
+      showError("无法连接本地服务，请确认 ReadPI 仍在运行。");
       return;
     }
     toast((error && error.message) || "笔记请求失败", "bad");
@@ -1316,7 +1316,7 @@
           .sort((a, b) => Number(b.updated) - Number(a.updated))
           .map((note) => noteMarkdown(note, "##"))
           .join("\n\n---\n\n");
-        const header = `# BabelDOC Studio 笔记导出\n\n导出时间：${new Date().toLocaleString("zh-CN")}\n\n---\n\n`;
+        const header = `# ReadPI 笔记导出\n\n导出时间：${new Date().toLocaleString("zh-CN")}\n\n---\n\n`;
         download(header + body + "\n", "BabelDOC-notes.md", "text/markdown;charset=utf-8");
         toast(`已导出 ${notes.length} 条笔记`, "good");
       } catch (error) {

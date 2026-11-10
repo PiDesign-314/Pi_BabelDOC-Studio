@@ -17,7 +17,11 @@ PRICES: dict[str, tuple[float, float, float, str]] = {
     "glm-4-air": (0.5, 0.5, 0.5, "CNY"),
     "glm-4-plus": (5.0, 5.0, 5.0, "CNY"),
     "glm-4.6": (4.0, 16.0, 4.0, "CNY"),
-    # DeepSeek（元 / 百万 tokens）
+    # DeepSeek（元 / 百万 tokens；取高峰时段参考价，空闲时段约为一半）
+    "deepseek-flash": (2.0, 8.0, 0.04, "CNY"),
+    "deepseek-v4-pro": (9.0, 27.0, 0.30, "CNY"),
+    # 旧模型名（deepseek-chat / deepseek-reasoner，2026-07-24 下线）仅用于
+    # 兼容历史配置，估算仍按旧参考价。
     "deepseek-chat": (2.0, 8.0, 0.5, "CNY"),
     "deepseek-reasoner": (4.0, 16.0, 1.0, "CNY"),
     # 阿里云百炼 Qwen（元 / 百万 tokens）

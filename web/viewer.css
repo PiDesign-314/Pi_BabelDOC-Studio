@@ -310,7 +310,27 @@ body.reader {
   cursor: text;
   transform-origin: 0% 0%;
 }
-.r-text ::selection { background: rgba(10, 132, 255, 0.28); }
+/* The browser paints one translucent box per text span.  A BabelDOC CJK line is
+   split into many per-glyph/word spans with subpixel gaps and overlaps, so that
+   paint shows white seams and darker double-painted stripes.  Keep the native
+   selection (copy, keyboard selection, toolbar) but hide its paint: the bands
+   below draw the selection instead. */
+/* Global ::selection sets an opaque foreground. Keep the PDF.js text layer
+   invisible even while selected, or browser glyphs overprint the PDF canvas. */
+.r-text::selection,
+.r-text ::selection { background: transparent; color: transparent; }
+
+/* App-drawn selection: one band per selected text line, positioned in page
+   space exactly like a committed highlight.  Multiply keeps the glyph pixels
+   under the tint dark and matches how .r-mark paints.  The layer sits between
+   the text and the counterpart ghost, so marks (in .r-anno) stay above it. */
+.r-select { position: absolute; inset: 0; pointer-events: none; }
+.r-select .r-pick {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(10, 132, 255, 0.26);
+  mix-blend-mode: multiply;
+}
 
 .r-pages.note-mode .r-page { cursor: crosshair; }
 
@@ -572,6 +592,24 @@ body.reader {
 .r-dot.teal { background: #4fd6c6; }
 .r-dot.red { background: #ff8a80; }
 .r-dot.on { box-shadow: 0 0 0 2px var(--card), 0 0 0 3.5px var(--accent); }
+/* "Add a custom emphasis colour" dot at the end of the selection palette. */
+.r-dot-add {
+  display: inline-grid;
+  place-items: center;
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--text-3) 65%, transparent);
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1;
+  font-family: inherit;
+}
+.r-dot-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+/* The native picker is opened from the "+" dot; it must not take layout. */
+.r-color-native { position: fixed; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0; }
 
 .r-vsep { width: 1px; height: 16px; background: var(--line); margin: 0 2px; }
 
@@ -890,6 +928,35 @@ body[data-paper=ink] .r-stage { background: #cfcfc8; }
 .r-style-btn.on { background: var(--blue); color: #fff; }
 .r-sel .r-style-btn { width: 24px; height: 24px; }
 
+/* One hand entry in the toolbars; its 轻微 / 自然 / 明显 presets are chips next
+   to the editor's style buttons (shown only for an open hand highlight). */
+.r-editor-hand {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+.r-editor-hand[hidden] { display: none; }
+.r-editor-hand-label {
+  margin: 0 3px 0 4px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.r-hand-chip {
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.r-hand-chip:hover { background: color-mix(in srgb, var(--text-2) 10%, transparent); color: var(--text); }
+.r-hand-chip.on { background: var(--blue); color: #fff; }
+
 /* Popovers (colour, type, paper, legend) float above the reader and never
    clip against the toolbar. */
 .r-pop {
@@ -1094,6 +1161,64 @@ body.reader .toasts { bottom: 92px; }
 .r-side-resize.dragging::after { background: var(--blue); }
 body.side-dragging, body.side-dragging * { cursor: col-resize !important; user-select: none !important; }
 
+/* A slim tab on the sidebar's edge: the obvious "put this away" affordance.
+   When collapsed, a floating tab at the stage's left edge brings it back. */
+.r-side-handle {
+  position: absolute;
+  right: -13px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 56px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 7px 7px 0;
+  background: color-mix(in srgb, var(--card) 90%, transparent);
+  color: var(--text-3);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  z-index: 6;
+  box-shadow: 2px 0 6px rgba(17, 17, 26, 0.06);
+  transition: color 0.16s ease, background 0.16s ease;
+}
+.r-side-handle:hover,
+.r-side-handle:focus-visible {
+  color: var(--text);
+  background: var(--card);
+  outline: none;
+}
+.r-side-handle svg { display: block; }
+.r-side-expand {
+  position: fixed;
+  left: 0;
+  top: calc(var(--topbar-h) + 50%);
+  transform: translateY(-50%);
+  width: 16px;
+  height: 54px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  color: var(--text-3);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  z-index: 45;
+  box-shadow: 2px 0 10px rgba(17, 17, 26, 0.08);
+  transition: color 0.16s ease, background 0.16s ease;
+}
+.r-side-expand:hover,
+.r-side-expand:focus-visible {
+  color: var(--text);
+  background: var(--card);
+  outline: none;
+}
+.r-side-expand[hidden] { display: none !important; }
+.r-side-expand svg { display: block; }
+
 /* ------------------------------------------------------ colour filters -- */
 .r-filter {
   display: flex;
@@ -1137,6 +1262,8 @@ body.side-dragging, body.side-dragging * { cursor: col-resize !important; user-s
   height: 100%;
   pointer-events: none;
 }
+/* Mirror rail for annotations that belong to the left half of the page. */
+.r-margin.r-margin-left { left: auto; right: 100%; }
 .r-mcard {
   position: absolute;
   left: 18px;
@@ -1162,9 +1289,11 @@ body.side-dragging, body.side-dragging * { cursor: col-resize !important; user-s
   pointer-events: auto;
   transition: transform 0.14s ease, box-shadow 0.14s ease;
 }
+.r-margin-left .r-mcard { left: 0; right: 18px; }
 .r-mcard:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(17, 17, 26, 0.14); }
 
-/* Leader line from the annotated sentence to its margin card. */
+/* Leader line from the annotated sentence to its margin card.  The path is an
+   orthogonal polyline with rounded turns, so the joins are rounded too. */
 .r-mlink {
   position: absolute;
   z-index: 0;
@@ -1176,6 +1305,7 @@ body.side-dragging, body.side-dragging * { cursor: col-resize !important; user-s
   stroke-width: 1.2;
   stroke-opacity: 0.55;
   stroke-linecap: round;
+  stroke-linejoin: round;
   transition: stroke-opacity 0.16s ease, stroke-width 0.16s ease;
 }
 .r-mlink circle {
@@ -1202,6 +1332,9 @@ body.side-dragging, body.side-dragging * { cursor: col-resize !important; user-s
   word-break: break-word;
 }
 body.margin-notes .r-scroll { padding-right: 296px; }
+/* The page gives the left rail the same room only while a left-side card
+   exists (the class is kept in sync by syncMarginColumns in viewer.js). */
+body.margin-notes.margin-left .r-scroll { padding-left: 296px; }
 
 /* ------------------------------------------------------ inline text tool -- */
 .r-page-text {
@@ -1234,6 +1367,28 @@ body.margin-notes .r-scroll { padding-right: 296px; }
 .r-page-text.editing:empty::before { opacity: 0.7; }
 
 /* ------------------------------------------------------- mark finishes -- */
+/* Hand-drawn styles are underlines drawn by web/hand-underline.js: the band
+   itself stays transparent and one SVG per text line carries the ink. */
+.r-mark[data-style="hand"],
+.r-mark[data-style="hand-soft"],
+.r-mark[data-style="hand-natural"],
+.r-mark[data-style="hand-strong"] {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  opacity: 1;
+}
+.r-mark[data-style="hand"] > svg.hand-underline,
+.r-mark[data-style="hand-soft"] > svg.hand-underline,
+.r-mark[data-style="hand-natural"] > svg.hand-underline,
+.r-mark[data-style="hand-strong"] > svg.hand-underline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
 .r-mark[data-style="hand"],
 .r-mark[data-style="crayon"] { border-radius: 0; }
 .r-mark[data-style="crayon"] {
@@ -1249,6 +1404,16 @@ body.margin-notes .r-scroll { padding-right: 296px; }
 }
 .r-mark[data-style="underline"] { background: transparent; border-radius: 0; border-bottom: 2px solid var(--mark-color); }
 .r-mark[data-style="pencil"] { background: transparent; border-radius: 0; border-bottom: 1.5px dashed var(--mark-color); }
+/* Fallback lane: a hand mark has to read as an underline even when the
+   hand-underline module is missing or failed to render — never as a filled
+   highlighter band. */
+.r-mark[data-finish="hand-fallback"] {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid var(--mark-color);
+  border-radius: 0;
+  opacity: 1;
+}
 
 /* ---------------------------------------------------- selection toolbar -- */
 .r-sel-colors { display: flex; align-items: center; gap: 5px; }
@@ -1421,12 +1586,14 @@ body.reader .toasts { bottom: 118px; }
   .r-dock { padding: 6px; }
   .r-dock-sep { margin: 0 4px; }
   body.margin-notes .r-scroll { padding-right: 250px; }
+  body.margin-notes.margin-left .r-scroll { padding-left: 250px; }
   .r-margin { width: 204px; }
 }
 @media (max-width: 860px) {
   .r-textbar-label, .r-textbar-font span { display: none; }
   .r-textbar { gap: 4px; padding: 0 8px; }
   body.margin-notes .r-scroll { padding-right: 24px; }
+  body.margin-notes.margin-left .r-scroll { padding-left: 24px; }
   .r-margin { display: none; }
 }
 
@@ -1550,3 +1717,147 @@ body.reader .toasts { bottom: 118px; }
 }
 .r-font-group span { font-variant-numeric: tabular-nums; }
 
+/* ---------------------------------------------------- colour tag manager -- */
+/* Dock → 颜色标签: one manageable row per tag (drag handle, swatch, name, ×)
+   followed by the add row.  Dot rows in the selection toolbar / editor are
+   rendered by the reader from the same ordered tag list. */
+.r-pop[data-kind="legend"] { width: 292px; }
+.r-tag-list { display: grid; gap: 2px; margin-top: 8px; }
+.r-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 4px;
+  border-radius: 9px;
+  background: transparent;
+}
+.r-tag-row:hover { background: var(--card-soft); }
+.r-tag-row.on { background: color-mix(in srgb, var(--blue) 9%, transparent); }
+.r-tag-row.dragging {
+  opacity: 0.55;
+  background: var(--card-soft);
+  box-shadow: 0 4px 14px rgba(17, 17, 26, 0.12);
+}
+.r-tag-grip {
+  flex: none;
+  width: 13px;
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: -1px;
+  text-align: center;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.r-tag-grip:active { cursor: grabbing; }
+.r-tag-swatch {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid rgba(17, 17, 26, 0.14);
+}
+.r-tag-name {
+  flex: 1;
+  min-width: 0;
+  height: 23px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card-soft);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+/* The tag row is compact so a full tag list plus the add row and switches fit
+   inside the popover; the global input[type=text] rule (styles.css) is more
+   specific than .r-tag-name, so scope the override to the legend popover. */
+.r-pop[data-kind="legend"] .r-tag-name {
+  min-height: 0;
+  height: 23px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+.r-tag-name:focus {
+  outline: none;
+  border-color: var(--blue);
+  background: var(--card);
+}
+.r-tag-del {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.r-tag-del:hover { background: var(--accent-soft); color: var(--accent); }
+.r-tag-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+.r-tag-add input[type="color"] {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card-soft);
+  cursor: pointer;
+}
+.r-tag-add input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+.r-tag-add input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 5px; }
+.r-tag-add input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card-soft);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.r-tag-add button {
+  flex: none;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--blue);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.r-tag-add button:hover { background: color-mix(in srgb, var(--blue) 86%, #fff); }
+
+/* Many tags must wrap instead of pushing the floating toolbar off-screen. */
+.r-sel-colors { flex-wrap: wrap; max-width: 300px; row-gap: 5px; }
+.r-colors { flex-wrap: wrap; max-width: 168px; row-gap: 3px; }
+.r-card-color {
+  flex: none;
+  max-width: 78px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--card-soft);
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--text-3);
+}

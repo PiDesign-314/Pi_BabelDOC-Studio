@@ -1,0 +1,12 @@
+{
+  "zotero": "10.0.8",
+  "addon": {
+    "version": "1.0.2",
+    "isActive": true,
+    "isCompatible": true,
+    "appDisabled": false
+  },
+  "menuAPI": "function",
+  "readerAPI": "function",
+  "preferencesAPI": "function"
+}

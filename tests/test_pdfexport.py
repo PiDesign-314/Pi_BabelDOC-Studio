@@ -254,6 +254,26 @@ def test_unknown_colour_falls_back_to_yellow(tmp_path):
     assert stroke == (1.0, 0.84, 0.1)
 
 
+def test_custom_hex_colour_tags_survive_the_store_and_the_export(tmp_path, annotation_dir):
+    """User-managed colour tags may use a custom #rrggbb colour."""
+    source = make_pdf(tmp_path / "doc-hex.pdf")
+    item = {
+        "type": "highlight",
+        "page": 1,
+        "color": "#3AA0FF",
+        "rects": [{"x": 70, "y": 86, "w": 120, "h": 14}],
+        "comment": "待核",
+    }
+    saved = annotations.save(source, [item])
+    assert saved["items"][0]["color"] == "#3aa0ff"
+
+    result = pdfexport.export(source, saved["items"])
+    with pymupdf.open(result["path"]) as document:
+        annot = next(document[0].annots())
+        stroke = tuple(round(value, 3) for value in annot.colors["stroke"])
+    assert stroke == (round(0x3A / 255, 3), round(0xA0 / 255, 3), round(0xFF / 255, 3))
+
+
 def test_drawing_roundtrip(tmp_path, annotation_dir):
     source = make_pdf(tmp_path / 'drawing.pdf')
     items = [
@@ -292,9 +312,15 @@ def test_new_highlight_styles_roundtrip(tmp_path, annotation_dir):
          'rects':[{'x':70,'y':120,'w':120,'h':14}]},
         {'type':'highlight','page':1,'color':'red','style':'hand',
          'rects':[{'x':70,'y':154,'w':120,'h':14}]},
+        {'type':'highlight','page':1,'color':'pink','style':'hand-soft',
+         'rects':[{'x':70,'y':188,'w':120,'h':14}]},
+        {'type':'highlight','page':1,'color':'orange','style':'hand-strong',
+         'rects':[{'x':70,'y':222,'w':120,'h':14}]},
     ]
     stored = annotations.save(source, items)['items']
-    assert [item['style'] for item in stored] == ['crayon', 'wavy', 'hand']
+    assert [item['style'] for item in stored] == [
+        'crayon', 'wavy', 'hand', 'hand-soft', 'hand-strong'
+    ]
     # An unknown style must fall back instead of reaching the page.
     assert annotations._sanitize([{'type':'highlight','page':1,'style':'sparkle',
                                   'rects':[{'x':1,'y':1,'w':2,'h':2}]}])[0]['style'] == 'marker'
@@ -302,5 +328,5 @@ def test_new_highlight_styles_roundtrip(tmp_path, annotation_dir):
     result = pdfexport.export(source, stored)
     with pymupdf.open(result['path']) as document:
         types = [annot.type[0] for annot in document[0].annots()]
-    # marker-like styles export as highlights, wavy as an underline
-    assert types == [8, 9, 8]
+    # marker-like styles export as highlights, hand/underline styles as underlines
+    assert types == [8, 9, 9, 9, 9]
