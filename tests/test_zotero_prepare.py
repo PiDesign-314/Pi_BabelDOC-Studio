@@ -189,8 +189,8 @@ def test_explicit_variant_opens_that_edition(studio):
         assert response.status_code == 200, response.get_json()
         data = response.get_json()
         assert data["variant"] == variant
-        assert Path(data["path"]) == expected
-        assert viewer_path(data["url"]) == str(expected)
+        assert Path(data["path"]).samefile(expected)
+        assert Path(viewer_path(data["url"])).samefile(expected)
         assert data["page"] == 1
         assert data["pages"] == 3
 
@@ -211,8 +211,8 @@ def test_read_without_variant_keeps_the_auto_preference(studio):
     resumed = post_open(studio, source, mode="read").get_json()
     assert resumed["ok"] is True
     assert resumed["variant"] == "translation"
-    assert Path(resumed["path"]) == translation
-    assert viewer_path(resumed["url"]) == str(translation)
+    assert Path(resumed["path"]).samefile(translation)
+    assert Path(viewer_path(resumed["url"])).samefile(translation)
 
 
 def test_explicit_variant_maps_the_reader_page(studio):
@@ -227,7 +227,7 @@ def test_explicit_variant_maps_the_reader_page(studio):
     assert response.status_code == 200, response.get_json()
     data = response.get_json()
     assert data["variant"] == "dual"
-    assert Path(data["path"]) == dual
+    assert Path(data["path"]).samefile(dual)
     assert data["pages"] == 6
     assert data["page"] == 3
 
