@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="web/babeldoc-icon.png" width="132" alt="ReadPI"/>
+<img src="docs/readpi-zotero-lockup.png" width="400" alt="Zotero 与 ReadPI 联动"/>
 
 <h1>ReadPI</h1>
 
